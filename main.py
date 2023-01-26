@@ -242,6 +242,10 @@ def get_private_list_from_latest_preferences():
     keys = list(private_playlists.keys())
     key = keys[random.randint(0, len(keys) - 1)] # Any private list should work the same
     return private_playlists[key]
+
+def get_private_list_from_latest_preferences_by_id(list_id):
+    private_playlist = preferences[-1]['result']['shared']['value']['unpublishedCollections'][list_id]
+    return private_playlist
     
 def is_list_checked(list_id):
     check_box = driver.find_element(By.CSS_SELECTOR, 'input#select-%s' % list_id)
@@ -259,7 +263,7 @@ def test_add_item_to_private_list_from_claim_preview():
         assert len(diff) == 3
         assert diff[0][0] == 'change'
         assert diff[0][1] == 'result.shared.value.unpublishedCollections.%s.itemCount' % private_playlist['id']
-        assert (diff[0][2][0] + 1) == diff[0][2][1]
+        assert (diff[0][2][0] + 1) == diff[0][2][1] # Item count went up
 
         assert diff[1][0] == 'add'
         assert diff[1][1] == 'result.shared.value.unpublishedCollections.%s.items' % private_playlist['id']
@@ -310,11 +314,59 @@ def refresh_page():
 
 def test_add_item_to_private_list_REFRESH_remove_same_item_from_private_list():
     def check_item_was_removed_properly():
-        diff = list(get_latest_preference_diff())
-        print_json(diff)
+        def get_placement_of_item_before_deletion():
+            i = 0
+            for item in private_playlist['items']:
+                if re.search(short_claim_name, item):
+                    return i
+                i += 1
 
-    private_playlist = test_add_item_to_private_list_from_claim_preview() # Returns list it adds the item to
+        diff = list(get_latest_preference_diff())
+
+        # Check item count went down
+        assert diff[0][0] == 'change', f'Expected "change", got: {diff[0][0]}'
+        assert diff[0][1] == 'result.shared.value.unpublishedCollections.%s.itemCount' % private_playlist['id'], f"Expected {'result.shared.value.unpublishedCollections.%s.itemCount' % private_playlist['id']}, got: {diff[0][1]}"
+        assert (diff[0][2][0] - 1) == diff[0][2][1], f"Expected '{diff[0][2][0] - 1}', got '{diff[0][2][1]}'"
+
+        # This checks that items after the item removed from the list are moved up by one
+        changes_start_index = get_placement_of_item_before_deletion()
+        changes_end_index = private_playlist['itemCount'] - 1 # Last action to items is deletion instead of change
+        i = 1
+        old_value = private_playlist['items'][get_placement_of_item_before_deletion()]
+        if diff[i][0] == 'change':
+            for list_i in range(changes_start_index, changes_end_index):
+                assert diff[i][0] == 'change'
+                assert diff[i][1][0] == 'result'
+                assert diff[i][1][1] == 'shared'
+                assert diff[i][1][2] == 'value'
+                assert diff[i][1][3] == 'unpublishedCollections'
+                assert diff[i][1][4] == private_playlist['id']
+                assert diff[i][1][5] == 'items'
+                assert diff[i][1][6] == list_i
+
+                assert len(diff[i][2]) == 2
+                assert diff[i][2][0] == old_value
+                old_value = diff[i][2][1]
+                i += 1
+
+        assert diff[i][0] == "remove"
+        assert diff[i][1] == 'result.shared.value.unpublishedCollections.%s.items' % private_playlist['id']
+        last_index = len(private_playlist['items']) - 1
+        assert diff[i][2][0][0] == last_index, f"Expected '{last_index}', got: '{diff[i][2][0]}'"
+        assert diff[i][2][0][1] == old_value
+        i += 1
+
+        assert diff[i][0] == 'change'
+        assert diff[i][1] == 'result.shared.value.unpublishedCollections.%s.updatedAt' % private_playlist['id']
+        assert is_unix_time_now(diff[2][2][1])
+
+        print('SUCCESS: Item removed succesfully')
+
+
+    private_playlist = test_add_item_to_private_list_from_claim_preview() # Returns list it added the item to
+    private_playlist = get_private_list_from_latest_preferences_by_id(private_playlist['id'])
     refresh_page()
+    print('Testing removing item from private list from claim preview')
     current_network_requests_count = len(driver.requests)
 
     # Find claim tile that's in the list already
@@ -338,9 +390,6 @@ def test_add_item_to_private_list_REFRESH_remove_same_item_from_private_list():
     preferences.append(decode_response_body(pref_set_call.response))
 
     check_item_was_removed_properly()
-
-
-
 
 def main():
     driver.get('https://odysee.com')
