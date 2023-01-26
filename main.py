@@ -143,6 +143,12 @@ def click_confirm_playlist_creation_in_save_to_popup():
     confirm_btn = driver.find_element(By.CSS_SELECTOR, 'input-submit > [aria-label="Confirm"]')
     click_once_clickable(confirm_btn)
 
+def get_last_responded_call(call_url, method):
+    for request in driver.requests.reverse():
+        if request.method == method and request.url == call_url and request.response:
+            return request
+    return None
+
 
 def wait_and_return_next_call(call_url, method, first_request_index_to_check):
     i = first_request_index_to_check
@@ -251,8 +257,7 @@ def is_list_checked(list_id):
     check_box = driver.find_element(By.CSS_SELECTOR, 'input#select-%s' % list_id)
     return check_box.get_attribute('checked') == 'true'
 
-def click_checkbox_in_save_to_popup(playlist):
-    list_id = playlist['id']
+def click_checkbox_in_save_to_popup(list_id):
     check_box = driver.find_element(By.CSS_SELECTOR, 'input#select-%s' % list_id)
     click_once_clickable(check_box)
 
@@ -275,27 +280,15 @@ def test_add_item_to_private_list_from_claim_preview():
         assert diff[2][1] == 'result.shared.value.unpublishedCollections.%s.updatedAt' % private_playlist['id']
         assert is_unix_time_now(diff[2][2][1])
 
-        print('SUCCESS: Item addedd sucesfully')
+        print('SUCCESS: Item added sucessfully')
     
     print('Testing adding item to private list from claim preview')
     current_network_requests_count = len(driver.requests)
     private_playlist = get_private_list_from_latest_preferences()
 
-    # Find item that's not in the list already
-    found_playlistable_claim_that_is_not_in_playlist = False
-    tiles_tried = 0
-    while not found_playlistable_claim_that_is_not_in_playlist:
-        claim_preview_tile = get_playlistable_claim_preview_tile(tiles_to_skip=tiles_tried)
-        click_3_dot_menu_in_claim_preview_tile(claim_preview_tile)
-        click_add_to_playlist_in_3_dot_menu()
-
-        found_playlistable_claim_that_is_not_in_playlist = not is_list_checked(private_playlist['id'])
-        if not found_playlistable_claim_that_is_not_in_playlist:
-            click_close_button()
-            tiles_tried += 1
-
+    claim_preview_tile = open_save_to_playlist_popup_from_playlistable_claim_preview_tile_that_is_not_in_the_list_and_return_claim_preview_tile(private_playlist['id'])
     short_claim_name = get_short_claim_name_from_claim_preview_tile(claim_preview_tile)
-    click_checkbox_in_save_to_popup(private_playlist)
+    click_checkbox_in_save_to_popup(private_playlist['id'])
 
     call_url = 'https://api.na-backend.odysee.com/api/v1/proxy?m=preference_set'
     pref_set_call = wait_and_return_next_call(call_url, 'POST', current_network_requests_count)
@@ -305,12 +298,27 @@ def test_add_item_to_private_list_from_claim_preview():
 
     return private_playlist # For deletion test
 
-def refresh_page():
+def refresh_page_and_wait_prefrence_get():
     current_network_requests_count = len(driver.requests)
     driver.get('https://odysee.com')
     call_url = 'https://api.na-backend.odysee.com/api/v1/proxy?m=preference_get'
     wait_and_return_next_call(call_url, 'POST', current_network_requests_count)
-    time.sleep(2)
+    time.sleep(3)
+
+def open_save_to_playlist_popup_from_playlistable_claim_preview_tile_that_is_not_in_the_list_and_return_claim_preview_tile(list_id):
+    found_playlistable_claim_that_is_not_in_playlist= False
+    tiles_tried = 0
+    while not found_playlistable_claim_that_is_not_in_playlist:
+        claim_preview_tile = get_playlistable_claim_preview_tile(tiles_to_skip=tiles_tried)
+        click_3_dot_menu_in_claim_preview_tile(claim_preview_tile)
+        click_add_to_playlist_in_3_dot_menu()
+
+        found_playlistable_claim_that_is_not_in_playlist = not is_list_checked(list_id)
+        if not found_playlistable_claim_that_is_not_in_playlist:
+            click_close_button()
+            tiles_tried += 1
+
+    return claim_preview_tile
 
 def test_add_item_to_private_list_REFRESH_remove_same_item_from_private_list():
     def check_item_was_removed_properly():
@@ -365,7 +373,7 @@ def test_add_item_to_private_list_REFRESH_remove_same_item_from_private_list():
 
     private_playlist = test_add_item_to_private_list_from_claim_preview() # Returns list it added the item to
     private_playlist = get_private_list_from_latest_preferences_by_id(private_playlist['id'])
-    refresh_page()
+    refresh_page_and_wait_prefrence_get()
     print('Testing removing item from private list from claim preview')
     current_network_requests_count = len(driver.requests)
 
@@ -383,13 +391,92 @@ def test_add_item_to_private_list_REFRESH_remove_same_item_from_private_list():
             tiles_tried += 1
 
     short_claim_name = get_short_claim_name_from_claim_preview_tile(claim_preview_tile)
-    click_checkbox_in_save_to_popup(private_playlist)
+    click_checkbox_in_save_to_popup(private_playlist['id'])
 
     call_url = 'https://api.na-backend.odysee.com/api/v1/proxy?m=preference_set'
     pref_set_call = wait_and_return_next_call(call_url, 'POST', current_network_requests_count)
     preferences.append(decode_response_body(pref_set_call.response))
 
     check_item_was_removed_properly()
+
+def click_playlists_in_side_bar():
+    playlists_btn = driver.find_element(By.CSS_SELECTOR, '[href="/$/playlists"]')
+    click_once_clickable(playlists_btn)
+
+def get_collection_list_response_body_by_navigating_to_playlist_and_refresh_page():
+    current_network_requests_count = len(driver.requests)
+    call_url = 'https://api.na-backend.odysee.com/api/v1/proxy?m=collection_list'
+    click_playlists_in_side_bar()
+    collection_list_call = wait_and_return_next_call(call_url, 'POST', current_network_requests_count)
+    refresh_page_and_wait_prefrence_get()
+    collection_list = decode_response_body(collection_list_call.response)
+    return collection_list
+
+
+def get_some_item_from_list(my_list):
+    return my_list[random.randint(0, len(my_list) - 1)]
+
+
+def has_edits(public_list):
+    return public_list['claim_id'] in preferences[-1]['result']['shared']['value']['editedCollections']
+
+def get_public_list_from_latest_collection_list():
+    collection_list_response = get_collection_list_response_body_by_navigating_to_playlist_and_refresh_page()
+
+    found_unedited_public_list = False
+    i = 0
+    while not found_unedited_public_list and i < 10:
+        public_playlist = get_some_item_from_list(collection_list_response['result']['items'])
+        found_unedited_public_list = not has_edits(public_playlist)
+        i += 1
+
+    if i >= 10:
+        print("Could find public list without edits in 10 tries")
+        exit(1)
+
+    return public_playlist
+
+
+def test_add_item_to_public_list_from_claim_preview():
+    def check_item_was_added_properly():
+        diff = list(get_latest_preference_diff())
+
+        assert len(diff) == 1
+        assert diff[0][0] == 'add'
+        assert diff[0][1] == 'result.shared.value.editedCollections'
+        assert diff[0][2][0][0] == public_playlist['claim_id']
+
+        edited_list = diff[0][2][0][1]
+        assert edited_list['id'] == public_playlist['claim_id']
+        assert edited_list['itemCount'] == len(public_playlist['value']['claims']) + 1
+
+        for i in range(0, len(public_playlist['value']['claims'])):
+            lbry_url_in_edited_list = edited_list['items'][i]
+            claim_id_in_public_list = public_playlist['value']['claims'][i]
+            assert is_permanent_lbry_url(lbry_url_in_edited_list)
+            assert re.search(claim_id_in_public_list, lbry_url_in_edited_list)
+
+        assert re.search(short_claim_name, edited_list['items'][-1])
+        assert edited_list['name'] == public_playlist['name']
+        assert edited_list['title'] == public_playlist['value']['title']
+        assert edited_list['type'] == 'playlist'
+        assert is_unix_time_now(edited_list['updatedAt'])
+
+        print('SUCCESS: Item added sucessfully')
+
+    print('Testing adding item to public list from claim preview')
+    current_network_requests_count = len(driver.requests)
+    public_playlist = get_public_list_from_latest_collection_list()
+    claim_preview_tile = open_save_to_playlist_popup_from_playlistable_claim_preview_tile_that_is_not_in_the_list_and_return_claim_preview_tile(public_playlist['claim_id'])
+    short_claim_name = get_short_claim_name_from_claim_preview_tile(claim_preview_tile)
+    click_checkbox_in_save_to_popup(public_playlist['claim_id'])
+
+    call_url = 'https://api.na-backend.odysee.com/api/v1/proxy?m=preference_set'
+    pref_set_call = wait_and_return_next_call(call_url, 'POST', current_network_requests_count)
+    preferences.append(decode_response_body(pref_set_call.response))
+
+    check_item_was_added_properly()
+
 
 def main():
     driver.get('https://odysee.com')
@@ -399,7 +486,8 @@ def main():
     log_in() # Also creates first preference state
     #test_create_new_playlist_from_claim_preview() # Adds the claim to playlist by default
     #test_add_item_to_private_list_from_claim_preview()
-    test_add_item_to_private_list_REFRESH_remove_same_item_from_private_list()
+    #test_add_item_to_private_list_REFRESH_remove_same_item_from_private_list()
+    test_add_item_to_public_list_from_claim_preview()
 
     input('Press enter to stop(may need to still close window)')
 
