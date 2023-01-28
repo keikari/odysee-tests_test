@@ -13,7 +13,6 @@ from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.common.keys import Keys
 from selenium.common.exceptions import ElementNotInteractableException, NoSuchElementException, ElementClickInterceptedException
 
-from deepdiff import DeepDiff
 from dictdiffer import diff as Diff
 
 preferences = []
@@ -42,7 +41,7 @@ def print_json(js):
 
 def click_once_clickable(btn):
     try:
-        WebDriverWait(driver, 20).until(
+        WebDriverWait(driver, 5).until(
             EC.element_to_be_clickable(btn)
         ).click()
     except (ElementClickInterceptedException, ElementNotInteractableException):
@@ -259,10 +258,7 @@ def click_close_button():
     click_once_clickable(close_button)
 
 def get_random_list_from_latest_stored_preferences(list_type, min_items=0, max_items=99999999):
-    if list_type is LIST_TYPES.EDITED:
-        key = 'editedCollections'
-    elif list_type is LIST_TYPES.PRIVATE:
-        key = 'unpublishedCollections'
+    key = get_key_for_list_type(list_type)
 
     lists = preferences[-1]['result']['shared']['value'][key]
     non_empty_list_keys =[]
@@ -273,9 +269,14 @@ def get_random_list_from_latest_stored_preferences(list_type, min_items=0, max_i
     key = non_empty_list_keys[random.randint(0, len(non_empty_list_keys) - 1)]
     return lists[key]
 
-def get_private_list_from_stored_preferences_by_id(list_id, preference_index=-1):
-    private_list = preferences[preference_index]['result']['shared']['value']['unpublishedCollections'][list_id]
-    return private_list
+def get_unpublished_list_from_stored_preferences_by_id(list_id, list_type, preference_index=-1):
+    if list_type is LIST_TYPES.PRIVATE:
+        type_key = 'unpublishedCollections'
+    elif list_type is LIST_TYPES.EDITED:
+        type_key = 'editedCollections'
+
+    unpublished_list = preferences[preference_index]['result']['shared']['value'][type_key][list_id]
+    return unpublished_list
 
 def is_list_checked(list_id):
     check_box = driver.find_element(By.CSS_SELECTOR, 'input#select-%s' % list_id)
@@ -359,29 +360,40 @@ def get_placement_of_item_in_list(list_items, text_to_match):
             return i
         i += 1
 
-def check_item_was_removed_properly_from_private_list(private_list_id, text_to_match_list_item, deleted_from=LIST_DELETE_LOCATIONS.POPUP):
+def get_key_for_list_type(list_type):
+    if list_type is LIST_TYPES.EDITED:
+        key = 'editedCollections'
+    elif list_type is LIST_TYPES.PRIVATE:
+        key = 'unpublishedCollections'
+
+    return key
+
+def check_item_was_removed_properly_from_unpublished_list(
+        private_list_id, list_type, text_to_match_list_item, deleted_from=LIST_DELETE_LOCATIONS.POPUP):
     try:
-        prev_private_list = get_private_list_from_stored_preferences_by_id(private_list_id, -2)
         diff = list(get_latest_preference_diff())
+        prev_list = get_unpublished_list_from_stored_preferences_by_id(private_list_id, list_type, -2)
+        list_key = get_key_for_list_type(list_type)
         # Check item count went down
         assert diff[0][0] == 'change', f'Expected "change", got: {diff[0][0]}'
-        assert diff[0][1] == 'result.shared.value.unpublishedCollections.%s.itemCount' % prev_private_list['id'], f"Expected {'result.shared.value.unpublishedCollections.%s.itemCount' % prev_private_list['id']}, got: {diff[0][1]}"
+        assert diff[0][1] == 'result.shared.value.%s.%s.itemCount' % (list_key, prev_list['id']),\
+            f"Expected 'result.shared.value.{list_key}.{prev_list['id']}.itemCount', got: {diff[0][1]}"
         assert (diff[0][2][0] - 1) == diff[0][2][1], f"Expected '{diff[0][2][0] - 1}', got '{diff[0][2][1]}'"
 
         # This checks that items after the item removed from the list are moved up by one
-        changes_start_index = get_placement_of_item_in_list(list_items=prev_private_list['items'],
+        changes_start_index = get_placement_of_item_in_list(list_items=prev_list['items'],
                                                                     text_to_match=text_to_match_list_item)
-        changes_end_index = prev_private_list['itemCount'] - 1 # Last action to items is deletion instead of change
+        changes_end_index = prev_list['itemCount'] - 1 # Last action to items is deletion instead of change
         i = 1
-        old_value = prev_private_list['items'][changes_start_index]
+        old_value = prev_list['items'][changes_start_index]
         if diff[i][0] == 'change':
             for list_i in range(changes_start_index, changes_end_index):
                 assert diff[i][0] == 'change'
                 assert diff[i][1][0] == 'result'
                 assert diff[i][1][1] == 'shared'
                 assert diff[i][1][2] == 'value'
-                assert diff[i][1][3] == 'unpublishedCollections'
-                assert diff[i][1][4] == prev_private_list['id']
+                assert diff[i][1][3] == list_key
+                assert diff[i][1][4] == prev_list['id']
                 assert diff[i][1][5] == 'items'
                 assert diff[i][1][6] == list_i
 
@@ -391,31 +403,31 @@ def check_item_was_removed_properly_from_private_list(private_list_id, text_to_m
                 i += 1
 
         assert diff[i][0] == "remove"
-        assert diff[i][1] == 'result.shared.value.unpublishedCollections.%s.items' % prev_private_list['id']
-        last_index = len(prev_private_list['items']) - 1
+        assert diff[i][1] == 'result.shared.value.%s.%s.items' % (list_key, prev_list['id'])
+        last_index = len(prev_list['items']) - 1
         assert diff[i][2][0][0] == last_index, f"Expected '{last_index}', got: '{diff[i][2][0][0]}'"
         assert diff[i][2][0][1] == old_value
         i += 1
 
         assert diff[i][0] == 'change'
-        assert diff[i][1] == 'result.shared.value.unpublishedCollections.%s.updatedAt' % prev_private_list['id']
+        assert diff[i][1] == 'result.shared.value.%s.%s.updatedAt' % (list_key, prev_list['id'])
         assert is_unix_time_now(diff[i][2][1])
 
         # Few GUI checks
         if (deleted_from == LIST_DELETE_LOCATIONS.POPUP):
-            check_box = driver.find_element(By.CSS_SELECTOR, 'input#select-%s' % prev_private_list['id'])
-            label = driver.find_element(By.CSS_SELECTOR, 'label[for="select-%s"]' % prev_private_list['id'])
+            check_box = driver.find_element(By.CSS_SELECTOR, 'input#select-%s' % prev_list['id'])
+            label = driver.find_element(By.CSS_SELECTOR, 'label[for="select-%s"]' % prev_list['id'])
             assert check_box.get_attribute('checked') == None, f"Expected 'false', got: {check_box.get_attribute('checked')}"
-            assert label.get_attribute('innerText') == prev_private_list['name']
+            assert label.get_attribute('innerText') == prev_list['name']
 
-        print('SUCCESS: Item removed succesfully')
+        print('SUCCESS: Item removed successfully')
     except Exception as e:
         print_json(diff)
         raise e
 
 def test_add_item_to_private_list_REFRESH_remove_same_item_from_private_list():
     private_list = test_add_item_to_private_list_from_claim_preview() # Returns list it added the item to
-    private_list = get_private_list_from_stored_preferences_by_id(private_list['id'])
+    private_list = get_unpublished_list_from_stored_preferences_by_id(private_list['id'], LIST_TYPES.PRIVATE)
     refresh_page_and_wait_prefrence_get()
     print('Testing removing item from private list from claim preview')
 
@@ -435,7 +447,7 @@ def test_add_item_to_private_list_REFRESH_remove_same_item_from_private_list():
     short_claim_name = get_short_claim_name_from_claim_preview_tile(claim_preview_tile)
     click_checkbox_in_save_to_popup(private_list['id'])
 
-    check_item_was_removed_properly_from_private_list(private_list['id'], text_to_match_list_item=short_claim_name)
+    check_item_was_removed_properly_from_unpublished_list(private_list['id'], LIST_TYPES.PRIVATE, text_to_match_list_item=short_claim_name)
 
 def click_lists_in_side_bar():
     lists_btn = driver.find_element(By.CSS_SELECTOR, '[href="/$/playlists"]')
@@ -481,28 +493,15 @@ def do_search_for_text(text):
     search_bar.send_keys(text)
     search_bar.send_keys(Keys.RETURN)
 
-def remove_item_from_private_list_by_lbry_url(private_list_id, lbry_url):
+def remove_item_from_unpublished_list_by_lbry_url(list_id, list_type, lbry_url):
     do_search_for_text(lbry_url)
     click_add_to_list_in_file_page()
-    click_checkbox_in_save_to_popup(private_list_id)
-    check_item_was_removed_properly_from_private_list(private_list_id, lbry_url)
+    click_checkbox_in_save_to_popup(list_id)
+    check_item_was_removed_properly_from_unpublished_list(list_id, list_type, lbry_url)
 
 def click_add_to_list_in_file_page():
     add_to_list_btn = driver.find_element(By.CSS_SELECTOR, '[aria-label="Add this video to a playlist"]')
     click_once_clickable(add_to_list_btn)
-
-def test_remove_all_items_from_private_list_using_file_page(min_items=0, max_items=9999999):
-    refresh_page_and_wait_prefrence_get()
-    print("Testing removing all items from private list using file page")
-    private_list = get_random_list_from_latest_stored_preferences(LIST_TYPES.PRIVATE, min_items, max_items)
-    for lbry_url in private_list['items']:
-        remove_item_from_private_list_by_lbry_url(private_list['id'], lbry_url)
-
-    private_list = get_private_list_from_stored_preferences_by_id(private_list['id'], -1)
-    assert len(private_list['items']) == 0
-    # Removal of each item is checked separately, if this is reached things should work like expected
-    print('SUCCESS: All items removed from private list')
-
 
 def go_to_list_page(list_id):
     driver.get('https://odysee.com/$/playlist/%s' % list_id)
@@ -541,13 +540,13 @@ def click_delete_on_listitem_on_arrange_mode(li):
 
     return item_url
 
-def remove_all_private_list_items_in_arrange_mode(private_list_id):
+def remove_all_private_list_items_in_arrange_mode(private_list_id, list_type=LIST_TYPES.PRIVATE):
     ul = driver.find_element(By.CSS_SELECTOR, 'ul[data-rbd-droppable-id="list__ordering"]')
     lists = ul.find_elements(By.CSS_SELECTOR, 'li')
 
     for li in lists:
         item_url = click_delete_on_listitem_on_arrange_mode(li)
-        check_item_was_removed_properly_from_private_list(private_list_id, text_to_match_list_item=item_url,
+        check_item_was_removed_properly_from_unpublished_list(private_list_id, list_type, text_to_match_list_item=item_url,
                                                           deleted_from=LIST_DELETE_LOCATIONS.ARRANGE_MODE)
 
 def test_remove_all_items_from_private_list_using_edit(min_items=0, max_items=99999):
@@ -562,8 +561,6 @@ def test_add_item_to_public_list_from_claim_preview():
     def check_item_was_added_properly():
         try:
             diff = list(get_latest_preference_diff())
-            print_json(diff)
-            print(20*'-')
 
             assert len(diff) == 1
             assert diff[0][0] == 'add'
@@ -617,9 +614,6 @@ def test_add_item_to_public_list_from_claim_preview():
     check_item_was_added_properly()
 
 def test_add_item_to_edited_list_from_claim_preview():
-    def check_item_was_added_properly():
-        diff = list(get_latest_preference_diff())
-        print_json(diff)
     refresh_page_and_wait_prefrence_get()
     print('Testing adding item to edited list from claim preview')
     edited_list = get_random_list_from_latest_stored_preferences(LIST_TYPES.EDITED)
@@ -628,22 +622,41 @@ def test_add_item_to_edited_list_from_claim_preview():
     click_checkbox_in_save_to_popup(edited_list['id'])
     check_item_was_added_properly_to_unpublished_list(edited_list, LIST_TYPES.EDITED, short_claim_name)
 
+def test_remove_all_items_from_unpublished_list_using_file_page(list_type, min_items=0, max_items=99999):
+    refresh_page_and_wait_prefrence_get()
+    if list_type is LIST_TYPES.PRIVATE:
+        print("Testing removing all items from private list using file page")
+    elif list_type is LIST_TYPES.EDITED:
+        print("Testing removing all items from edited list using file page")
+
+    unpublished_list = get_random_list_from_latest_stored_preferences(list_type, min_items, max_items)
+    for lbry_url in unpublished_list['items']:
+        remove_item_from_unpublished_list_by_lbry_url(unpublished_list['id'], list_type, lbry_url)
+
+    unpublished_list = get_unpublished_list_from_stored_preferences_by_id(unpublished_list['id'], list_type, -1)
+    assert len(unpublished_list['items']) == 0
+    # Removal of each item is checked separately, if this is reached things should work like expected
+    print('SUCCESS: All items removed from the list')
+
+
 def main():
     driver.get('https://odysee.com')
     driver.implicitly_wait(10)
 
     reject_cookies()
     log_in() # Also creates first preference state
-    #test_create_new_list_from_claim_preview() # Adds the claim to list by default
+    test_create_new_list_from_claim_preview() # Adds the claim to list by default
     test_add_item_to_private_list_from_claim_preview()
-    #test_add_item_to_private_list_REFRESH_remove_same_item_from_private_list()
-    #test_remove_all_items_from_private_list_using_file_page(min_items=1, max_items=5)
-    #test_add_item_to_public_list_from_claim_preview()
+    test_add_item_to_private_list_REFRESH_remove_same_item_from_private_list()
+    test_add_item_to_public_list_from_claim_preview()
+
+    test_add_item_to_edited_list_from_claim_preview()
+    test_remove_all_items_from_unpublished_list_using_file_page(LIST_TYPES.PRIVATE, min_items=1, max_items=5)
+    test_remove_all_items_from_unpublished_list_using_file_page(LIST_TYPES.EDITED, min_items=1, max_items=5)
 
     # Affected by updatedAt bug
     #test_remove_all_items_from_private_list_using_edit(min_items=1, max_items=10)
 
-    test_add_item_to_edited_list_from_claim_preview()
 
     input('Press enter to stop(may need to still close window)')
 
