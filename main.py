@@ -2,6 +2,7 @@ import time
 import re
 import json
 import random
+from enum import Enum
 #from selenium import webdriver
 from seleniumwire import webdriver
 from seleniumwire.utils import decode
@@ -22,6 +23,11 @@ random.seed(int(time.time()))
 driver = webdriver.Firefox()
 action = webdriver.ActionChains(driver)
 
+
+class LIST_DELETE_LOCATIONS(Enum):
+    POPUP = 1
+    ARRANGE_MODE = 2
+
 def print_json(js):
     print(json.dumps(js, indent=2))
 
@@ -30,7 +36,7 @@ def click_once_clickable(btn):
         WebDriverWait(driver, 20).until(
             EC.element_to_be_clickable(btn)
         ).click()
-    except ElementClickInterceptedException:
+    except (ElementClickInterceptedException, ElementNotInteractableException):
         driver.execute_script('arguments[0].click();', btn)
 
 
@@ -69,7 +75,6 @@ def log_in():
         email_input = driver.find_element(By.ID, 'password')
         email_input.send_keys(password)
 
-    
     def click_continue_btn():
         continue_btn = driver.find_element(By.CSS_SELECTOR, '[aria-label="Continue"]')
         click_once_clickable(continue_btn)
@@ -91,7 +96,6 @@ def log_in():
                 print('Probably failed to log in')
         check_email_in_profile_menu()
         click_profile_menu()
-
 
     print('Login started')
     email_n_pass = get_email_and_password()
@@ -133,7 +137,7 @@ def click_add_to_list_in_3_dot_menu():
 
 
 def click_new_list_in_save_to_popup():
-    new_list_btn = driver.find_element(By.CSS_SELECTOR, '[aria-label="New list"]')
+    new_list_btn = driver.find_element(By.CSS_SELECTOR, '[aria-label="New Playlist"]')
     click_once_clickable(new_list_btn)
 
 def enter_name_for_list_in_save_to_popup(name):
@@ -142,7 +146,7 @@ def enter_name_for_list_in_save_to_popup(name):
 
 def click_confirm_list_creation_in_save_to_popup():
     confirm_btn = driver.find_element(By.CSS_SELECTOR, 'input-submit > [aria-label="Confirm"]')
-    click_once_clickable(confirm_btn)
+    click_item_and_wait_preference_set(confirm_btn)
 
 def get_last_responded_call(call_url, method):
     for request in driver.requests.reverse():
@@ -194,37 +198,41 @@ def is_unix_time_now(unix_time):
 def test_create_new_list_from_claim_preview():
     refresh_page_and_wait_prefrence_get()
     def check_new_list_was_created_properly():
-        # Check changes in preferences
-        diff = list(get_latest_preference_diff())
-        assert len(diff) == 1
-        assert diff[0][0] == 'add'
-        assert diff[0][1] == 'result.shared.value.unpublishedCollections'
+        try:
+            # Check changes in preferences
+            diff = list(get_latest_preference_diff())
+            assert len(diff) == 1
+            assert diff[0][0] == 'add'
+            assert diff[0][1] == 'result.shared.value.unpublishedCollections'
 
-        # Check key to the list
-        list_id = diff[0][2][0][0]
-        list_dict = diff[0][2][0][1]
-        assert re.match('[a-f|0-9]{8}(-[a-f|0-9]{4}){3}-[a-f|0-9]{12}', list_id)
-        assert list_id == list_dict['id']
+            # Check key to the list
+            list_id = diff[0][2][0][0]
+            list_dict = diff[0][2][0][1]
+            assert re.match('[a-f|0-9]{8}(-[a-f|0-9]{4}){3}-[a-f|0-9]{12}', list_id)
+            assert list_id == list_dict['id']
 
-        # Check the list value
-        assert list_name == list_dict['name']
-        assert is_unix_time_now(list_dict['createdAt'])
-        assert list_dict['createdAt'] == list_dict['updatedAt']
-        assert list_dict['itemCount'] == 1
-        assert len(list_dict['items']) == list_dict['itemCount']
-        assert is_permanent_lbry_url(list_dict['items'][0])
-        assert re.search(short_claim_name, list_dict['items'][0])
+            # Check the list value
+            assert list_name == list_dict['name']
+            assert is_unix_time_now(list_dict['createdAt'])
+            assert list_dict['createdAt'] == list_dict['updatedAt']
+            assert list_dict['itemCount'] == 1
+            assert len(list_dict['items']) == list_dict['itemCount']
+            assert is_permanent_lbry_url(list_dict['items'][0])
+            assert re.search(short_claim_name, list_dict['items'][0])
 
-        # Few GUI checks
-        check_box = driver.find_element(By.CSS_SELECTOR, 'input#select-%s' % list_id)
-        label = driver.find_element(By.CSS_SELECTOR, 'label[for="select-%s"]' % list_id)
-        assert check_box.get_attribute('checked') == 'true'
-        assert label.get_attribute('innerText') == list_name
+            # Few GUI checks
+            check_box = driver.find_element(By.CSS_SELECTOR, 'input#select-%s' % list_id)
+            label = driver.find_element(By.CSS_SELECTOR, 'label[for="select-%s"]' % list_id)
+            assert check_box.get_attribute('checked') == 'true'
+            assert label.get_attribute('innerText') == list_name
 
-        print('SUCCESS: New list created succestully, with item in it')
+            print('SUCCESS: New list created succestully, with item in it')
+
+        except Exception as e:
+            print_json(diff)
+            raise e
 
     print('Testing list creation from claim preview')
-    current_network_requests_count = len(driver.requests)
     list_name = '0-test-name-%d' % random.randint(1, 999999999) # Random to avoid duplicate names
     claim_preview_tile = get_listable_claim_preview_tile()
     short_claim_name = get_short_claim_name_from_claim_preview_tile(claim_preview_tile)
@@ -234,10 +242,6 @@ def test_create_new_list_from_claim_preview():
     click_new_list_in_save_to_popup()
     enter_name_for_list_in_save_to_popup(list_name)
     click_confirm_list_creation_in_save_to_popup()
-
-    call_url = 'https://api.na-backend.odysee.com/api/v1/proxy?m=preference_set'
-    pref_set_call = wait_and_return_next_call(call_url, 'POST', current_network_requests_count)
-    preferences.append(decode_response_body(pref_set_call.response))
 
     check_new_list_was_created_properly()
 
@@ -258,15 +262,14 @@ def get_random_private_list_from_latest_stored_preferences(min_items=0, max_item
 def get_private_list_from_stored_preferences_by_id(list_id, preference_index=-1):
     private_list = preferences[preference_index]['result']['shared']['value']['unpublishedCollections'][list_id]
     return private_list
-    
+
 def is_list_checked(list_id):
     check_box = driver.find_element(By.CSS_SELECTOR, 'input#select-%s' % list_id)
     return check_box.get_attribute('checked') == 'true'
 
 def click_checkbox_in_save_to_popup(list_id):
     check_box = driver.find_element(By.CSS_SELECTOR, 'input#select-%s' % list_id)
-    click_once_clickable(check_box)
-
+    click_item_and_wait_preference_set(check_box)
 
 def test_add_item_to_private_list_from_claim_preview():
     refresh_page_and_wait_prefrence_get()
@@ -287,19 +290,20 @@ def test_add_item_to_private_list_from_claim_preview():
         assert diff[2][1] == 'result.shared.value.unpublishedCollections.%s.updatedAt' % private_list['id']
         assert is_unix_time_now(diff[2][2][1])
 
+        # Few GUI checks
+        check_box = driver.find_element(By.CSS_SELECTOR, 'input#select-%s' % private_list['id'])
+        label = driver.find_element(By.CSS_SELECTOR, 'label[for="select-%s"]' % private_list['id'])
+        assert check_box.get_attribute('checked') == 'true'
+        assert label.get_attribute('innerText') == private_list['name']
+
         print('SUCCESS: Item added sucessfully')
-    
+
     print('Testing adding item to private list from claim preview')
-    current_network_requests_count = len(driver.requests)
     private_list = get_random_private_list_from_latest_stored_preferences()
 
     claim_preview_tile = open_save_to_list_popup_from_listable_claim_preview_tile_that_is_not_in_the_list_and_return_claim_preview_tile(private_list['id'])
     short_claim_name = get_short_claim_name_from_claim_preview_tile(claim_preview_tile)
     click_checkbox_in_save_to_popup(private_list['id'])
-
-    call_url = 'https://api.na-backend.odysee.com/api/v1/proxy?m=preference_set'
-    pref_set_call = wait_and_return_next_call(call_url, 'POST', current_network_requests_count)
-    preferences.append(decode_response_body(pref_set_call.response))
 
     check_item_was_added_properly()
 
@@ -334,9 +338,9 @@ def get_placement_of_item_in_list(list_items, text_to_match):
             return i
         i += 1
 
-def check_item_was_removed_properly_from_private_list(private_list, text_to_match_list_item):
+def check_item_was_removed_properly_from_private_list(private_list_id, text_to_match_list_item, deleted_from=LIST_DELETE_LOCATIONS.POPUP):
     try:
-        prev_private_list = get_private_list_from_stored_preferences_by_id(private_list['id'], -2)
+        prev_private_list = get_private_list_from_stored_preferences_by_id(private_list_id, -2)
         diff = list(get_latest_preference_diff())
         # Check item count went down
         assert diff[0][0] == 'change', f'Expected "change", got: {diff[0][0]}'
@@ -376,19 +380,23 @@ def check_item_was_removed_properly_from_private_list(private_list, text_to_matc
         assert diff[i][1] == 'result.shared.value.unpublishedCollections.%s.updatedAt' % prev_private_list['id']
         assert is_unix_time_now(diff[i][2][1])
 
+        # Few GUI checks
+        if (deleted_from == LIST_DELETE_LOCATIONS.POPUP):
+            check_box = driver.find_element(By.CSS_SELECTOR, 'input#select-%s' % prev_private_list['id'])
+            label = driver.find_element(By.CSS_SELECTOR, 'label[for="select-%s"]' % prev_private_list['id'])
+            assert check_box.get_attribute('checked') == None, f"Expected 'false', got: {check_box.get_attribute('checked')}"
+            assert label.get_attribute('innerText') == prev_private_list['name']
+
         print('SUCCESS: Item removed succesfully')
-    except AssertionError as e:
+    except Exception as e:
         print_json(diff)
         raise e
 
 def test_add_item_to_private_list_REFRESH_remove_same_item_from_private_list():
-    refresh_page_and_wait_prefrence_get()
-
     private_list = test_add_item_to_private_list_from_claim_preview() # Returns list it added the item to
     private_list = get_private_list_from_stored_preferences_by_id(private_list['id'])
     refresh_page_and_wait_prefrence_get()
     print('Testing removing item from private list from claim preview')
-    current_network_requests_count = len(driver.requests)
 
     # Find claim tile that's in the list already
     found_listable_claim_that_is_in_list = False
@@ -406,14 +414,10 @@ def test_add_item_to_private_list_REFRESH_remove_same_item_from_private_list():
     short_claim_name = get_short_claim_name_from_claim_preview_tile(claim_preview_tile)
     click_checkbox_in_save_to_popup(private_list['id'])
 
-    call_url = 'https://api.na-backend.odysee.com/api/v1/proxy?m=preference_set'
-    pref_set_call = wait_and_return_next_call(call_url, 'POST', current_network_requests_count)
-    preferences.append(decode_response_body(pref_set_call.response))
-
-    check_item_was_removed_properly_from_private_list(private_list, text_to_match_list_item=short_claim_name)
+    check_item_was_removed_properly_from_private_list(private_list['id'], text_to_match_list_item=short_claim_name)
 
 def click_lists_in_side_bar():
-    lists_btn = driver.find_element(By.CSS_SELECTOR, '[href="/$/lists"]')
+    lists_btn = driver.find_element(By.CSS_SELECTOR, '[href="/$/playlists"]')
     click_once_clickable(lists_btn)
 
 def get_collection_list_response_body_by_navigating_to_list_and_refresh_page():
@@ -444,8 +448,8 @@ def get_public_list_from_latest_collection_list():
         i += 1
 
     if i >= 10:
-        print("Could find public list without edits in 10 tries")
-        exit(1)
+        input("Could find public list without edits in 10 tries. Exiting...")
+        exit()
 
     return public_list
 
@@ -454,70 +458,138 @@ def do_search_for_text(text):
     search_bar.send_keys(text)
     search_bar.send_keys(Keys.RETURN)
 
-def toggle_checkbox_in_add_to_list_popup(private_list):
-    current_network_requests_count = len(driver.requests)
-    click_checkbox_in_save_to_popup(private_list['id'])
-    call_url = 'https://api.na-backend.odysee.com/api/v1/proxy?m=preference_set'
-    pref_set_call = wait_and_return_next_call(call_url, 'POST', current_network_requests_count)
-    preferences.append(decode_response_body(pref_set_call.response))
-
-def remove_item_from_list_by_lbry_url(lbry_url, private_list):
-    print(lbry_url)
+def remove_item_from_private_list_by_lbry_url(private_list_id, lbry_url):
     do_search_for_text(lbry_url)
     click_add_to_list_in_file_page()
-    toggle_checkbox_in_add_to_list_popup(private_list)
-    check_item_was_removed_properly_from_private_list(private_list, lbry_url)
+    click_checkbox_in_save_to_popup(private_list_id)
+    check_item_was_removed_properly_from_private_list(private_list_id, lbry_url)
 
 def click_add_to_list_in_file_page():
     add_to_list_btn = driver.find_element(By.CSS_SELECTOR, '[aria-label="Add this video to a playlist"]')
     click_once_clickable(add_to_list_btn)
 
-
-def test_remove_all_items_from_private_list():
-    private_list = get_random_private_list_from_latest_stored_preferences(min_items=2, max_items=5)
+def test_remove_all_items_from_private_list_using_file_page(min_items=0, max_items=9999999):
+    refresh_page_and_wait_prefrence_get()
+    print("Testing removing all items from private list using file page")
+    private_list = get_random_private_list_from_latest_stored_preferences(min_items, max_items)
     for lbry_url in private_list['items']:
-        remove_item_from_list_by_lbry_url(lbry_url, private_list)
+        remove_item_from_private_list_by_lbry_url(private_list['id'], lbry_url)
 
-    print_json(private_list)
+    private_list = get_private_list_from_stored_preferences_by_id(private_list['id'], -1)
+    assert len(private_list['items']) == 0
+    # Removal of each item is checked separately, if this is reached things should work like expected
     print('SUCCESS: All items removed from private list')
 
+
+def go_to_list_page(list_id):
+    driver.get('https://odysee.com/$/playlist/%s' % list_id)
+
+def search_text_in_lists_page(text):
+    search_input = driver.find_element(By.CSS_SELECTOR, '[name="collection_search"]')
+    search_input.send_keys(text)
+
+def click_list_in_lists_page(list_id):
+    list_url = '/$/playlist/%s' % list_id
+    list_link = driver.find_element(By.CSS_SELECTOR, '[href="%s"]' % list_url)
+    click_once_clickable(list_link)
+
+def navigate_to_list_page(private_list):
+    click_lists_in_side_bar()
+    search_text_in_lists_page(private_list['name'])
+    click_list_in_lists_page(private_list['id'])
+
+def click_arrange_mode_in_list_page():
+    arrange_button = driver.find_element(By.CSS_SELECTOR, 'button[title="Arrange"]')
+    click_once_clickable(arrange_button)
+
+def click_item_and_wait_preference_set(item):
+    current_network_requests_count = len(driver.requests)
+    click_once_clickable(item)
+    call_url = 'https://api.na-backend.odysee.com/api/v1/proxy?m=preference_set'
+    pref_set_call = wait_and_return_next_call(call_url, 'POST', current_network_requests_count - 1)
+    preferences.append(decode_response_body(pref_set_call.response))
+
+def click_delete_on_listitem_on_arrange_mode(li):
+    item_url = li.get_attribute('data-rbd-draggable-id')
+    delete_btn = li.find_element(By.CSS_SELECTOR, 'button.button-collection-delete')
+    click_once_clickable(delete_btn)
+    delete_confirm_btn = li.find_element(By.CSS_SELECTOR, 'button.button-collection-delete-confirm')
+    click_item_and_wait_preference_set(delete_confirm_btn)
+
+    return item_url
+
+def remove_all_private_list_items_in_arrange_mode(private_list_id):
+    ul = driver.find_element(By.CSS_SELECTOR, 'ul[data-rbd-droppable-id="list__ordering"]')
+    lists = ul.find_elements(By.CSS_SELECTOR, 'li')
+
+    for li in lists:
+        item_url = click_delete_on_listitem_on_arrange_mode(li)
+        check_item_was_removed_properly_from_private_list(private_list_id, text_to_match_list_item=item_url,
+                                                          deleted_from=LIST_DELETE_LOCATIONS.ARRANGE_MODE)
+
+def test_remove_all_items_from_private_list_using_edit(min_items=0, max_items=99999):
+    print("Testing removing all items from private list using edit")
+    refresh_page_and_wait_prefrence_get()
+    private_list = get_random_private_list_from_latest_stored_preferences(min_items, max_items)
+    navigate_to_list_page(private_list)
+    click_arrange_mode_in_list_page()
+    remove_all_private_list_items_in_arrange_mode(private_list)
+
 def test_add_item_to_public_list_from_claim_preview():
+    refresh_page_and_wait_prefrence_get()
     def check_item_was_added_properly():
-        diff = list(get_latest_preference_diff())
+        try:
+            diff = list(get_latest_preference_diff())
+            print_json(diff)
+            print(20*'-')
 
-        assert len(diff) == 1
-        assert diff[0][0] == 'add'
-        assert diff[0][1] == 'result.shared.value.editedCollections'
-        assert diff[0][2][0][0] == public_list['claim_id']
+            assert len(diff) == 1
+            assert diff[0][0] == 'add'
+            assert diff[0][1] == 'result.shared.value.editedCollections'
+            assert diff[0][2][0][0] == public_list['claim_id']
 
-        edited_list = diff[0][2][0][1]
-        assert edited_list['id'] == public_list['claim_id']
-        assert edited_list['itemCount'] == len(public_list['value']['claims']) + 1
+            edited_list = diff[0][2][0][1]
+            assert edited_list['id'] == public_list['claim_id']
+            assert edited_list['itemCount'] == len(public_list['value']['claims']) + 1
 
-        for i in range(0, len(public_list['value']['claims'])):
-            lbry_url_in_edited_list = edited_list['items'][i]
-            claim_id_in_public_list = public_list['value']['claims'][i]
-            assert is_permanent_lbry_url(lbry_url_in_edited_list)
-            assert re.search(claim_id_in_public_list, lbry_url_in_edited_list)
+            for i in range(0, len(public_list['value']['claims'])):
+                lbry_url_in_edited_list = edited_list['items'][i]
+                claim_id_in_public_list = public_list['value']['claims'][i]
+                assert is_permanent_lbry_url(lbry_url_in_edited_list)
+                assert re.search(claim_id_in_public_list, lbry_url_in_edited_list)
 
-        assert re.search(short_claim_name, edited_list['items'][-1])
-        assert edited_list['name'] == public_list['name']
-        assert edited_list['title'] == public_list['value']['title']
-        assert edited_list['type'] == 'list'
-        assert is_unix_time_now(edited_list['updatedAt'])
+            assert re.search(short_claim_name, edited_list['items'][-1])
+            assert edited_list['type'] == 'playlist', f"Expected 'playlist', got: {edited_list['type']}"
+            assert is_unix_time_now(edited_list['updatedAt'])
 
-        print('SUCCESS: Item added sucessfully')
+            if 'thumbnail' in public_list['value']:
+                assert edited_list['thumbnail']['url'] == public_list['value']['thumbnail']['url']
+
+            if 'title' in public_list['value']:
+                assert edited_list['title'] == public_list['value']['title']
+                assert edited_list['name'] == public_list['value']['title'],\
+                    f"expected '{edited_list['name']}', got: '{public_list['value']['title']}'"
+
+            if 'description' in public_list['value']:
+                assert edited_list['description'] == public_list['value']['description']
+
+            # GUI
+            check_box = driver.find_element(By.CSS_SELECTOR, 'input#select-%s' % edited_list['id'])
+            label = driver.find_element(By.CSS_SELECTOR, 'label[for="select-%s"]' % edited_list['id'])
+            assert check_box.get_attribute('checked') == 'true', f"Expected 'None', got: {check_box.get_attribute('checked')}"
+            assert label.get_attribute('innerText') == edited_list['name']
+
+            print('SUCCESS: Item added sucessfully')
+
+        except Exception as e:
+            print_json(diff)
+            raise e
 
     print('Testing adding item to public list from claim preview')
-    current_network_requests_count = len(driver.requests)
     public_list = get_public_list_from_latest_collection_list()
     claim_preview_tile = open_save_to_list_popup_from_listable_claim_preview_tile_that_is_not_in_the_list_and_return_claim_preview_tile(public_list['claim_id'])
     short_claim_name = get_short_claim_name_from_claim_preview_tile(claim_preview_tile)
     click_checkbox_in_save_to_popup(public_list['claim_id'])
-
-    call_url = 'https://api.na-backend.odysee.com/api/v1/proxy?m=preference_set'
-    pref_set_call = wait_and_return_next_call(call_url, 'POST', current_network_requests_count)
-    preferences.append(decode_response_body(pref_set_call.response))
 
     check_item_was_added_properly()
 
@@ -528,12 +600,15 @@ def main():
 
     reject_cookies()
     log_in() # Also creates first preference state
-    #test_create_new_list_from_claim_preview() # Adds the claim to list by default
-    #test_add_item_to_private_list_from_claim_preview()
-    #test_add_item_to_private_list_REFRESH_remove_same_item_from_private_list()
-    test_remove_all_items_from_private_list()
-    #test_add_item_to_public_list_from_claim_preview()
-    #test_add_item_to_edited_list_from_claim_preview()
+    test_create_new_list_from_claim_preview() # Adds the claim to list by default
+    test_add_item_to_private_list_from_claim_preview()
+    test_add_item_to_private_list_REFRESH_remove_same_item_from_private_list()
+    test_remove_all_items_from_private_list_using_file_page(min_items=1, max_items=5)
+    test_add_item_to_public_list_from_claim_preview()
+
+    # Affected by updatedAt bug
+    #test_remove_all_items_from_private_list_using_edit(min_items=1, max_items=10)
+
 
     input('Press enter to stop(may need to still close window)')
 
