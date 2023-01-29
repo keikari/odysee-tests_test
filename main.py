@@ -431,7 +431,7 @@ def check_item_was_removed_properly_from_unpublished_list(
         print_json(diff)
         raise e
 
-def test_add_items_to_unpublished_list_REFRESH_remove_same_item_from_the_list(list_type, count_items_to_add):
+def test_add_items_to_unpublished_list_REFRESH_remove_one_item_from_the_list__from_claim_preview(list_type, count_items_to_add):
     unpublished_list = test_add_items_to_unpublished_list_from_claim_preview(list_type, count_items_to_add) # Returns list it added the item to
     unpublished_list = get_unpublished_list_from_stored_preferences_by_id(unpublished_list['id'], list_type)
     refresh_page_and_wait_prefrence_get()
@@ -646,6 +646,150 @@ def test_remove_all_items_from_unpublished_list_using_file_page(list_type, min_i
     assert is_unpublished_list_empty(unpublished_list['id'], list_type)
     print('SUCCESS: All items removed from the list')
 
+def click_edit_on_list_page():
+    edit_btn = driver.find_element(By.CSS_SELECTOR, 'button[title="Edit"]')
+    click_once_clickable(edit_btn)
+
+def change_title_on_edit():
+    test_titles = ["This is some title 1", "This is another title 2"]
+    title_input = driver.find_element(By.CSS_SELECTOR, 'input[name="collection_title"]')
+    old_title = title_input.get_attribute('value')
+
+    for title in test_titles:
+        if title != old_title:
+            title = title + f'-{random.randint(1, 999999)}' # Randint so all titles aren't same
+            title_input.send_keys(Keys.CONTROL + 'a')
+            title_input.send_keys(Keys.BACKSPACE)
+            title_input.send_keys(title)
+            return title
+
+def click_enter_a_thumbnail_url():
+    try:
+        driver.implicitly_wait(1)
+        btn = driver.find_element(By.CSS_SELECTOR, 'button[aria-label="Enter a thumbnail URL"]')
+        click_once_clickable(btn)
+    except NoSuchElementException:
+        # Probably already in thumbnail url mode
+        pass
+    driver.implicitly_wait(10)
+
+def change_thumbnail_url_on_edit():
+    test_thumbnail_urls = ['https://thumbs.odycdn.com/31693796b00c032839dbeaf6c49f81c7.webp',
+                       'https://thumbs.odycdn.com/5016468bd00470e741027f468a523431.webp']
+    click_enter_a_thumbnail_url()
+    thumbnail_url_input = driver.find_element(By.CSS_SELECTOR, 'input[name="content_thumbnail"]')
+    old_thumbnail_url = thumbnail_url_input.get_attribute('value')
+
+    for url in test_thumbnail_urls:
+        if url != old_thumbnail_url:
+            thumbnail_url_input.send_keys(Keys.CONTROL + 'a')
+            thumbnail_url_input.send_keys(Keys.BACKSPACE)
+            thumbnail_url_input.send_keys(url)
+            return url
+
+def change_description_on_edit():
+    test_descriptions = ["Descriping the list", "Missdescripting the list"]
+    description_input = driver.find_element(By.CSS_SELECTOR, '.CodeMirror-scroll')
+    description_text_span = driver.find_element(By.CSS_SELECTOR, 'span[role="presentation"]')
+    old_description = description_text_span.get_attribute('innerText')
+
+    for description in test_descriptions:
+        if description != old_description:
+            action.move_to_element(description_text_span).click().perform()
+            action.key_down(Keys.CONTROL).send_keys('a').perform()
+            action.send_keys(Keys.BACKSPACE).perform()
+            action.key_up(Keys.CONTROL).send_keys(description).perform()
+
+            return description
+
+def click_submit_btn():
+    submit_btn = driver.find_element(By.CSS_SELECTOR, '[type=submit]')
+    click_item_and_wait_preference_set(submit_btn)
+
+def check_unpublished_list_edits_got_applied_properly(list_id, list_type, new_describtion, new_title, new_thumbnail_url):
+    try:
+        diff = list(get_latest_preference_diff())
+        list_type_key = get_key_for_list_type(list_type)
+
+        list_details = {
+            'description': new_describtion,
+            'name': new_title,
+            'thumbnail': new_thumbnail_url,
+            'title': new_title,
+            'updatedAt': "",
+        }
+
+        # Assumes that new items are at the end of the diff
+        keys_checked_in_add = []
+        if diff[-1][0] == 'add':
+            assert diff[-1][1] == f'result.shared.value.{list_type_key}.{list_id}'
+            for entry in diff[-1][2]:
+                for detail_key in list_details.keys():
+                    if entry[0] == detail_key:
+                        if detail_key == 'thumbnail':
+                            assert entry[1]['url'] == list_details[entry[0]],\
+                                f'Expected "{list_details[entry[0]]}", got: "{entry[1]["url"]}"'
+                        else:
+                            assert entry[1] == list_details[entry[0]],\
+                                f'Expected "{list_details[entry[0]]}", got: "{entry[1]}"'
+                        keys_checked_in_add.append(detail_key)
+
+        # Delete checked keys, so the length of the diff can be calculated
+        for detail_key in keys_checked_in_add:
+            del list_details[detail_key]
+
+        assert len(diff) == len(list_details) + (0 if len(keys_checked_in_add) == 0 else 1) # diff == Changes + add (or just changes)
+        # Check changes applied succesfully
+        keys_checked_in_change = []
+        i = 0
+        while i < len(list_details):
+            assert diff[i][0] == 'change'
+            whole_key = diff[i][1].split(f'{list_id}.')[-1]
+            key = whole_key.split('.')[0] # Needed because of thumbnail.url
+            detail_key_to_delete = ""
+            for detail_key in list_details:
+                if key == detail_key:
+                    assert diff[i][1] == f'result.shared.value.{list_type_key}.{list_id}.{whole_key}'
+                    if detail_key == 'updatedAt':
+                        assert is_unix_time_now(diff[i][2][1])
+                    else:
+                        assert diff[i][2][1] == list_details[detail_key],\
+                            f'Expected "{list_details[detail_key]}", got: {diff[i][2][1]}'
+                    keys_checked_in_change.append(detail_key)
+            i += 1
+
+        # Delete checked keys
+        for detail_key in keys_checked_in_change:
+            del list_details[detail_key]
+
+        # All keus should have been matched and checked, and then deleted
+        assert len(list_details.keys()) == 0,\
+            f'Expected "0", got "{len(list_details.keys())}"'
+
+        print('SUCCESS: List details updated succesfully')
+
+    except Exception as e:
+        print_json(diff)
+        raise e
+
+def test_unpublished_list_details_edit(list_type):
+    if list_type is LIST_TYPES.PRIVATE:
+        print("Testing editing private list details")
+    elif list_type is LIST_TYPES.EDITED:
+        print("Testing editing edited list details")
+
+    refresh_page_and_wait_prefrence_get()
+    click_lists_in_side_bar()
+    unpublished_list = get_random_list_from_latest_stored_preferences(list_type)
+    search_text_in_lists_page(unpublished_list['name'])
+    click_list_in_lists_page(unpublished_list['id'])
+    click_edit_on_list_page()
+    new_title = change_title_on_edit()
+    new_thumbnail_url = change_thumbnail_url_on_edit()
+    new_describtion = change_description_on_edit()
+    click_submit_btn()
+
+    check_unpublished_list_edits_got_applied_properly(unpublished_list['id'], list_type, new_describtion, new_title, new_thumbnail_url)
 
 def main():
     driver.get('https://odysee.com')
@@ -653,15 +797,17 @@ def main():
 
     reject_cookies()
     log_in() # Also creates first preference state
-   # test_create_new_list_from_claim_preview() # Adds the claim to list by default
-   # test_add_items_to_unpublished_list_from_claim_preview(LIST_TYPES.PRIVATE, 5)
-   # test_add_items_to_unpublished_list_from_claim_preview(LIST_TYPES.EDITED, 3)
-    test_add_items_to_unpublished_list_REFRESH_remove_same_item_from_the_list(LIST_TYPES.PRIVATE, 2)
-    test_add_items_to_unpublished_list_REFRESH_remove_same_item_from_the_list(LIST_TYPES.EDITED, 1)
+    test_unpublished_list_details_edit(LIST_TYPES.PRIVATE)
+    #test_unpublished_list_details_edit(LIST_TYPES.EDITED)
+    test_create_new_list_from_claim_preview() # Adds the claim to list by default
+    test_add_items_to_unpublished_list_from_claim_preview(LIST_TYPES.PRIVATE, 5)
+   #test_add_items_to_unpublished_list_from_claim_preview(LIST_TYPES.EDITED, 3)
+    test_add_items_to_unpublished_list_REFRESH_remove_one_item_from_the_list__from_claim_preview(LIST_TYPES.PRIVATE, 2)
+   # test_add_items_to_unpublished_list_REFRESH_remove_one_item_from_the_list__from_claim_preview(LIST_TYPES.EDITED, 1)
    # test_add_item_to_public_list_from_claim_preview()
 
-   # test_remove_all_items_from_unpublished_list_using_file_page(LIST_TYPES.PRIVATE, min_items=1, max_items=5)
-   # test_remove_all_items_from_unpublished_list_using_file_page(LIST_TYPES.EDITED, min_items=1, max_items=5)
+    test_remove_all_items_from_unpublished_list_using_file_page(LIST_TYPES.PRIVATE, min_items=1, max_items=5)
+    test_remove_all_items_from_unpublished_list_using_file_page(LIST_TYPES.EDITED, min_items=1, max_items=5)
 
     # Affected by updatedAt bug
     #test_remove_all_items_from_unpublished_list_using_edit(LIST_TYPES.PRIVATE, min_items=1, max_items=10)
