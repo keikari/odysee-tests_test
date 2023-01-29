@@ -11,7 +11,7 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.common.keys import Keys
-from selenium.common.exceptions import ElementNotInteractableException, NoSuchElementException, ElementClickInterceptedException
+from selenium.common.exceptions import ElementNotInteractableException, NoSuchElementException, ElementClickInterceptedException, TimeoutException
 
 from dictdiffer import diff as Diff
 
@@ -27,11 +27,6 @@ class LIST_DELETE_LOCATIONS(Enum):
     POPUP = 1
     ARRANGE_MODE = 2
 
-class PUBLIC_LIST_TYPES(Enum):
-    EDITED = 1
-    NOT_EDITED = 2
-    ALL = 3
-
 class LIST_TYPES(Enum):
     EDITED = 1
     PRIVATE = 2
@@ -44,7 +39,7 @@ def click_once_clickable(btn):
         WebDriverWait(driver, 5).until(
             EC.element_to_be_clickable(btn)
         ).click()
-    except (ElementClickInterceptedException, ElementNotInteractableException):
+    except (ElementClickInterceptedException, ElementNotInteractableException, TimeoutException):
         driver.execute_script('arguments[0].click();', btn)
 
 
@@ -270,9 +265,9 @@ def get_random_list_from_latest_stored_preferences(list_type, min_items=0, max_i
     return lists[key]
 
 def get_unpublished_list_from_stored_preferences_by_id(list_id, list_type, preference_index=-1):
-    if list_type is LIST_TYPES.PRIVATE:
+    if list_type == LIST_TYPES.PRIVATE:
         type_key = 'unpublishedCollections'
-    elif list_type is LIST_TYPES.EDITED:
+    elif list_type == LIST_TYPES.EDITED:
         type_key = 'editedCollections'
 
     unpublished_list = preferences[preference_index]['result']['shared']['value'][type_key][list_id]
@@ -288,9 +283,9 @@ def click_checkbox_in_save_to_popup(list_id):
 
 def check_item_was_added_properly_to_unpublished_list(unpublished_list, list_type, short_claim_name):
     try:
-        if list_type is LIST_TYPES.PRIVATE:
+        if list_type == LIST_TYPES.PRIVATE:
             type_key = 'unpublishedCollections'
-        elif list_type is LIST_TYPES.EDITED:
+        elif list_type == LIST_TYPES.EDITED:
             type_key = 'editedCollections'
 
         diff = list(get_latest_preference_diff())
@@ -322,9 +317,9 @@ def check_item_was_added_properly_to_unpublished_list(unpublished_list, list_typ
 
 def test_add_items_to_unpublished_list_from_claim_preview(list_type, count_items_to_add):
     refresh_page_and_wait_prefrence_get()
-    if list_type is LIST_TYPES.PRIVATE:
+    if list_type == LIST_TYPES.PRIVATE:
         print(f"Testing adding {count_items_to_add} item(s) to private list from claim preview")
-    if list_type is LIST_TYPES.EDITED:
+    if list_type == LIST_TYPES.EDITED:
         print(f"Testing adding {count_items_to_add} item(s) to edited list from claim preview")
 
     unpublished_list = get_random_list_from_latest_stored_preferences(list_type)
@@ -367,9 +362,9 @@ def get_placement_of_item_in_list(list_items, text_to_match):
         i += 1
 
 def get_key_for_list_type(list_type):
-    if list_type is LIST_TYPES.EDITED:
+    if list_type == LIST_TYPES.EDITED:
         key = 'editedCollections'
-    elif list_type is LIST_TYPES.PRIVATE:
+    elif list_type == LIST_TYPES.PRIVATE:
         key = 'unpublishedCollections'
 
     return key
@@ -476,18 +471,16 @@ def get_some_item_from_list(my_list):
 def has_edits(public_list):
     return public_list['claim_id'] in preferences[-1]['result']['shared']['value']['editedCollections']
 
-def get_public_lists_from_latest_collection_list(wanted_type=PUBLIC_LIST_TYPES.ALL):
+def get_public_lists_from_latest_collection_list():
     collection_list_response = get_collection_list_response_body_by_navigating_to_list_and_refresh_page()
     public_lists = []
     for item in collection_list_response['result']['items']:
-        if has_edits(item) and wanted_type is not PUBLIC_LIST_TYPES.NOT_EDITED:
-            public_lists.append(item)
-        elif not has_edits(item) and wanted_type is not PUBLIC_LIST_TYPES.EDITED:
+        if not has_edits(item):
             public_lists.append(item)
     return public_lists
 
-def get_random_public_list_from_latest_collection_list(wanted_type=PUBLIC_LIST_TYPES.ALL):
-    public_lists = get_public_lists_from_latest_collection_list(wanted_type)
+def get_random_public_list_from_latest_collection_list():
+    public_lists = get_public_lists_from_latest_collection_list()
     if len(public_lists) < 1:
         input("Could find public list without edits in 10 tries. Exiting...")
         exit()
@@ -556,9 +549,9 @@ def remove_all_unpublished_list_items_in_arrange_mode(unpublished_list_id, list_
                                                           deleted_from=LIST_DELETE_LOCATIONS.ARRANGE_MODE)
 
 def test_remove_all_items_from_unpublished_list_using_edit(list_type, min_items=0, max_items=99999):
-    if list_type is LIST_TYPES.PRIVATE:
+    if list_type == LIST_TYPES.PRIVATE:
         print("Testing removing all items from private list using edit")
-    elif list_type is LIST_TYPES.EDITED:
+    elif list_type == LIST_TYPES.EDITED:
         print("Testing removing all items from edited list using edit")
     refresh_page_and_wait_prefrence_get()
     unpublished_list = get_random_list_from_latest_stored_preferences(list_type, min_items, max_items)
@@ -608,7 +601,7 @@ def test_add_item_to_public_list_from_claim_preview():
             # GUI
             check_box = driver.find_element(By.CSS_SELECTOR, 'input#select-%s' % edited_list['id'])
             label = driver.find_element(By.CSS_SELECTOR, 'label[for="select-%s"]' % edited_list['id'])
-            assert check_box.get_attribute('checked') == 'true', f"Expected 'None', got: {check_box.get_attribute('checked')}"
+            assert check_box.get_attribute('checked') == 'true', f"Expected 'true', got: {check_box.get_attribute('checked')}"
             assert label.get_attribute('innerText') == edited_list['name']
 
             print('SUCCESS: Item added sucessfully')
@@ -619,7 +612,7 @@ def test_add_item_to_public_list_from_claim_preview():
 
     refresh_page_and_wait_prefrence_get()
     print('Testing adding item to public list from claim preview')
-    public_list = get_random_public_list_from_latest_collection_list(wanted_type=PUBLIC_LIST_TYPES.NOT_EDITED)
+    public_list = get_random_public_list_from_latest_collection_list()
     claim_preview_tile = open_save_to_list_popup_from_listable_claim_preview_tile_that_is_not_in_the_list_and_return_claim_preview_tile(public_list['claim_id'])
     short_claim_name = get_short_claim_name_from_claim_preview_tile(claim_preview_tile)
     click_checkbox_in_save_to_popup(public_list['claim_id'])
@@ -633,9 +626,9 @@ def is_unpublished_list_empty(list_id, list_type):
 
 def test_remove_all_items_from_unpublished_list_using_file_page(list_type, min_items=0, max_items=99999):
     refresh_page_and_wait_prefrence_get()
-    if list_type is LIST_TYPES.PRIVATE:
+    if list_type == LIST_TYPES.PRIVATE:
         print("Testing removing all items from private list using file page")
-    elif list_type is LIST_TYPES.EDITED:
+    elif list_type == LIST_TYPES.EDITED:
         print("Testing removing all items from edited list using file page")
 
     unpublished_list = get_random_list_from_latest_stored_preferences(list_type, min_items, max_items)
@@ -773,9 +766,9 @@ def check_unpublished_list_edits_got_applied_properly(list_id, list_type, new_de
         raise e
 
 def test_unpublished_list_details_edit(list_type):
-    if list_type is LIST_TYPES.PRIVATE:
+    if list_type == LIST_TYPES.PRIVATE:
         print("Testing editing private list details")
-    elif list_type is LIST_TYPES.EDITED:
+    elif list_type == LIST_TYPES.EDITED:
         print("Testing editing edited list details")
 
     refresh_page_and_wait_prefrence_get()
@@ -791,27 +784,86 @@ def test_unpublished_list_details_edit(list_type):
 
     check_unpublished_list_edits_got_applied_properly(unpublished_list['id'], list_type, new_describtion, new_title, new_thumbnail_url)
 
+def test_remove_item_from_public_list_using_file_page():
+    def check_item_was_removed_properly_from_public_list(list_id, text_to_match_list_item):
+        try:
+            diff = list(get_latest_preference_diff())
+            print_json(diff)
+
+            assert len(diff) == 1
+            assert diff[0][0] == 'add'
+            assert diff[0][1] == 'result.shared.value.editedCollections'
+            assert diff[0][2][0][0] == public_list['claim_id']
+
+            edited_list = diff[0][2][0][1]
+            assert edited_list['id'] == public_list['claim_id']
+            assert edited_list['itemCount'] == len(public_list['value']['claims']) - 1
+
+            for i in range(0, len(edited_list['items'])):
+                lbry_url_in_edited_list = edited_list['items'][i]
+                claim_id_in_public_list = public_list['value']['claims'][i]
+                assert is_permanent_lbry_url(lbry_url_in_edited_list)
+                assert re.search(claim_id_in_public_list, lbry_url_in_edited_list)
+                assert not re.search(text_to_match_list_item, lbry_url_in_edited_list)
+
+            assert edited_list['type'] == 'playlist', f"Expected 'playlist', got: {edited_list['type']}"
+            assert is_unix_time_now(edited_list['updatedAt'])
+
+            if 'thumbnail' in public_list['value']:
+                assert edited_list['thumbnail']['url'] == public_list['value']['thumbnail']['url']
+
+            if 'title' in public_list['value']:
+                assert edited_list['title'] == public_list['value']['title']
+                assert edited_list['name'] == public_list['value']['title'],\
+                    f"expected '{edited_list['name']}', got: '{public_list['value']['title']}'"
+
+            if 'description' in public_list['value']:
+                assert edited_list['description'] == public_list['value']['description']
+
+            # GUI
+            check_box = driver.find_element(By.CSS_SELECTOR, 'input#select-%s' % edited_list['id'])
+            label = driver.find_element(By.CSS_SELECTOR, 'label[for="select-%s"]' % edited_list['id'])
+            assert check_box.get_attribute('checked') == None, f"Expected 'None', got: {check_box.get_attribute('checked')}"
+            assert label.get_attribute('innerText') == edited_list['name']
+
+            print('SUCCESS: Item removed sucessfully')
+
+        except Exception as e:
+            print_json(diff)
+            raise e
+
+    public_list = get_random_public_list_from_latest_collection_list()
+    do_search_for_text(public_list['permanent_url'])
+    click_add_to_list_in_file_page()
+    click_checkbox_in_save_to_popup(public_list['claim_id'])
+    check_item_was_removed_properly_from_public_list(public_list['claim_id'], public_list['permanent_url'])
+
 def main():
     driver.get('https://odysee.com')
     driver.implicitly_wait(10)
 
     reject_cookies()
     log_in() # Also creates first preference state
-    test_unpublished_list_details_edit(LIST_TYPES.PRIVATE)
-    #test_unpublished_list_details_edit(LIST_TYPES.EDITED)
-    test_create_new_list_from_claim_preview() # Adds the claim to list by default
-    test_add_items_to_unpublished_list_from_claim_preview(LIST_TYPES.PRIVATE, 5)
-   #test_add_items_to_unpublished_list_from_claim_preview(LIST_TYPES.EDITED, 3)
-    test_add_items_to_unpublished_list_REFRESH_remove_one_item_from_the_list__from_claim_preview(LIST_TYPES.PRIVATE, 2)
-   # test_add_items_to_unpublished_list_REFRESH_remove_one_item_from_the_list__from_claim_preview(LIST_TYPES.EDITED, 1)
-   # test_add_item_to_public_list_from_claim_preview()
 
+
+    # PRIVATE LIST
+    #test_create_new_list_from_claim_preview() # Adds the claim to list by default
+    #test_unpublished_list_details_edit(LIST_TYPES.PRIVATE)
+    #test_add_items_to_unpublished_list_from_claim_preview(LIST_TYPES.PRIVATE, 5)
+    #test_add_items_to_unpublished_list_REFRESH_remove_one_item_from_the_list__from_claim_preview(LIST_TYPES.PRIVATE, 2)
     test_remove_all_items_from_unpublished_list_using_file_page(LIST_TYPES.PRIVATE, min_items=1, max_items=5)
-    test_remove_all_items_from_unpublished_list_using_file_page(LIST_TYPES.EDITED, min_items=1, max_items=5)
-
-    # Affected by updatedAt bug
     #test_remove_all_items_from_unpublished_list_using_edit(LIST_TYPES.PRIVATE, min_items=1, max_items=10)
+
+    # EDITED LIST
+    #test_unpublished_list_details_edit(LIST_TYPES.EDITED)
+    #test_add_items_to_unpublished_list_from_claim_preview(LIST_TYPES.EDITED, 3)
+    #test_add_items_to_unpublished_list_REFRESH_remove_one_item_from_the_list__from_claim_preview(LIST_TYPES.EDITED, 1)
+    #test_remove_all_items_from_unpublished_list_using_file_page(LIST_TYPES.EDITED, min_items=1, max_items=5)
     #test_remove_all_items_from_unpublished_list_using_edit(LIST_TYPES.EDITED, min_items=1, max_items=10)
+
+    # PUBLIC LIST
+    #test_add_item_to_public_list_from_claim_preview()
+    #test_remove_item_from_public_list_using_file_page()
 
 
     input('Press enter to stop(may need to still close window)')
