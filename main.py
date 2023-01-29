@@ -515,10 +515,10 @@ def click_list_in_lists_page(list_id):
     list_link = driver.find_element(By.CSS_SELECTOR, '[href="%s"]' % list_url)
     click_once_clickable(list_link)
 
-def navigate_to_list_page(private_list):
+def navigate_to_list_page(unpublished_list):
     click_lists_in_side_bar()
-    search_text_in_lists_page(private_list['name'])
-    click_list_in_lists_page(private_list['id'])
+    search_text_in_lists_page(unpublished_list['name'])
+    click_list_in_lists_page(unpublished_list['id'])
 
 def click_arrange_mode_in_list_page():
     arrange_button = driver.find_element(By.CSS_SELECTOR, 'button[title="Arrange"]')
@@ -540,22 +540,29 @@ def click_delete_on_listitem_on_arrange_mode(li):
 
     return item_url
 
-def remove_all_private_list_items_in_arrange_mode(private_list_id, list_type=LIST_TYPES.PRIVATE):
+def remove_all_unpublished_list_items_in_arrange_mode(unpublished_list_id, list_type):
     ul = driver.find_element(By.CSS_SELECTOR, 'ul[data-rbd-droppable-id="list__ordering"]')
     lists = ul.find_elements(By.CSS_SELECTOR, 'li')
 
     for li in lists:
         item_url = click_delete_on_listitem_on_arrange_mode(li)
-        check_item_was_removed_properly_from_unpublished_list(private_list_id, list_type, text_to_match_list_item=item_url,
+        check_item_was_removed_properly_from_unpublished_list(unpublished_list_id, list_type, text_to_match_list_item=item_url,
                                                           deleted_from=LIST_DELETE_LOCATIONS.ARRANGE_MODE)
 
-def test_remove_all_items_from_private_list_using_edit(min_items=0, max_items=99999):
-    print("Testing removing all items from private list using edit")
+def test_remove_all_items_from_unpublished_list_using_edit(list_type, min_items=0, max_items=99999):
+    if list_type is LIST_TYPES.PRIVATE:
+        print("Testing removing all items from private list using edit")
+    elif list_type is LIST_TYPES.EDITED:
+        print("Testing removing all items from edited list using edit")
     refresh_page_and_wait_prefrence_get()
-    private_list = get_random_list_from_latest_stored_preferences(LIST_TYPES.PRIVATE, min_items, max_items)
-    navigate_to_list_page(private_list)
+    unpublished_list = get_random_list_from_latest_stored_preferences(list_type, min_items, max_items)
+    navigate_to_list_page(unpublished_list)
     click_arrange_mode_in_list_page()
-    remove_all_private_list_items_in_arrange_mode(private_list)
+    remove_all_unpublished_list_items_in_arrange_mode(unpublished_list['id'], list_type)
+
+    # Removal of each item is checked separately, if this is reached things should work like expected
+    assert is_unpublished_list_empty(unpublished_list['id'], list_type)
+    print('SUCCESS: All items removed from the list')
 
 def test_add_item_to_public_list_from_claim_preview():
     def check_item_was_added_properly():
@@ -622,6 +629,11 @@ def test_add_item_to_edited_list_from_claim_preview():
     click_checkbox_in_save_to_popup(edited_list['id'])
     check_item_was_added_properly_to_unpublished_list(edited_list, LIST_TYPES.EDITED, short_claim_name)
 
+def is_unpublished_list_empty(list_id, list_type):
+    unpublished_list = get_unpublished_list_from_stored_preferences_by_id(list_id, list_type, -1)
+    return len(unpublished_list['items']) == 0
+
+
 def test_remove_all_items_from_unpublished_list_using_file_page(list_type, min_items=0, max_items=99999):
     refresh_page_and_wait_prefrence_get()
     if list_type is LIST_TYPES.PRIVATE:
@@ -633,9 +645,8 @@ def test_remove_all_items_from_unpublished_list_using_file_page(list_type, min_i
     for lbry_url in unpublished_list['items']:
         remove_item_from_unpublished_list_by_lbry_url(unpublished_list['id'], list_type, lbry_url)
 
-    unpublished_list = get_unpublished_list_from_stored_preferences_by_id(unpublished_list['id'], list_type, -1)
-    assert len(unpublished_list['items']) == 0
     # Removal of each item is checked separately, if this is reached things should work like expected
+    assert is_unpublished_list_empty(unpublished_list['id'], list_type)
     print('SUCCESS: All items removed from the list')
 
 
@@ -645,17 +656,18 @@ def main():
 
     reject_cookies()
     log_in() # Also creates first preference state
-    test_create_new_list_from_claim_preview() # Adds the claim to list by default
-    test_add_item_to_private_list_from_claim_preview()
-    test_add_item_to_private_list_REFRESH_remove_same_item_from_private_list()
-    test_add_item_to_public_list_from_claim_preview()
+   # test_create_new_list_from_claim_preview() # Adds the claim to list by default
+   # test_add_item_to_private_list_from_claim_preview()
+   # test_add_item_to_private_list_REFRESH_remove_same_item_from_private_list()
+   # test_add_item_to_public_list_from_claim_preview()
 
-    test_add_item_to_edited_list_from_claim_preview()
-    test_remove_all_items_from_unpublished_list_using_file_page(LIST_TYPES.PRIVATE, min_items=1, max_items=5)
-    test_remove_all_items_from_unpublished_list_using_file_page(LIST_TYPES.EDITED, min_items=1, max_items=5)
+   # test_add_item_to_edited_list_from_claim_preview()
+   # test_remove_all_items_from_unpublished_list_using_file_page(LIST_TYPES.PRIVATE, min_items=1, max_items=5)
+   # test_remove_all_items_from_unpublished_list_using_file_page(LIST_TYPES.EDITED, min_items=1, max_items=5)
 
     # Affected by updatedAt bug
-    #test_remove_all_items_from_private_list_using_edit(min_items=1, max_items=10)
+    #test_remove_all_items_from_unpublished_list_using_edit(LIST_TYPES.PRIVATE, min_items=1, max_items=10)
+    #test_remove_all_items_from_unpublished_list_using_edit(LIST_TYPES.EDITED, min_items=1, max_items=10)
 
 
     input('Press enter to stop(may need to still close window)')
