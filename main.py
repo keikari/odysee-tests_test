@@ -320,16 +320,22 @@ def check_item_was_added_properly_to_unpublished_list(unpublished_list, list_typ
         print_json(diff)
         raise e
 
-def test_add_item_to_private_list_from_claim_preview():
+def test_add_items_to_unpublished_list_from_claim_preview(list_type, count_items_to_add):
     refresh_page_and_wait_prefrence_get()
-    print('Testing adding item to private list from claim preview')
-    private_list = get_random_list_from_latest_stored_preferences(LIST_TYPES.PRIVATE)
-    claim_preview_tile = open_save_to_list_popup_from_listable_claim_preview_tile_that_is_not_in_the_list_and_return_claim_preview_tile(private_list['id'])
-    short_claim_name = get_short_claim_name_from_claim_preview_tile(claim_preview_tile)
-    click_checkbox_in_save_to_popup(private_list['id'])
-    check_item_was_added_properly_to_unpublished_list(private_list, LIST_TYPES.PRIVATE, short_claim_name)
+    if list_type is LIST_TYPES.PRIVATE:
+        print(f"Testing adding {count_items_to_add} item(s) to private list from claim preview")
+    if list_type is LIST_TYPES.EDITED:
+        print(f"Testing adding {count_items_to_add} item(s) to edited list from claim preview")
 
-    return private_list # For deletion test
+    unpublished_list = get_random_list_from_latest_stored_preferences(list_type)
+    for i in range(0, count_items_to_add):
+        claim_preview_tile = open_save_to_list_popup_from_listable_claim_preview_tile_that_is_not_in_the_list_and_return_claim_preview_tile(unpublished_list['id'], tiles_to_skip=i)
+        short_claim_name = get_short_claim_name_from_claim_preview_tile(claim_preview_tile)
+        click_checkbox_in_save_to_popup(unpublished_list['id'])
+        check_item_was_added_properly_to_unpublished_list(unpublished_list, list_type, short_claim_name)
+        click_close_button()
+
+    return unpublished_list # For deletion test
 
 def refresh_page_and_wait_prefrence_get():
     current_network_requests_count = len(driver.requests)
@@ -338,9 +344,9 @@ def refresh_page_and_wait_prefrence_get():
     wait_and_return_next_call(call_url, 'POST', current_network_requests_count)
     time.sleep(3)
 
-def open_save_to_list_popup_from_listable_claim_preview_tile_that_is_not_in_the_list_and_return_claim_preview_tile(list_id):
+def open_save_to_list_popup_from_listable_claim_preview_tile_that_is_not_in_the_list_and_return_claim_preview_tile(list_id, tiles_to_skip=0):
     found_listable_claim_that_is_not_in_list= False
-    tiles_tried = 0
+    tiles_tried = tiles_to_skip
     while not found_listable_claim_that_is_not_in_list:
         claim_preview_tile = get_listable_claim_preview_tile(tiles_to_skip=tiles_tried)
         click_3_dot_menu_in_claim_preview_tile(claim_preview_tile)
@@ -425,9 +431,9 @@ def check_item_was_removed_properly_from_unpublished_list(
         print_json(diff)
         raise e
 
-def test_add_item_to_private_list_REFRESH_remove_same_item_from_private_list():
-    private_list = test_add_item_to_private_list_from_claim_preview() # Returns list it added the item to
-    private_list = get_unpublished_list_from_stored_preferences_by_id(private_list['id'], LIST_TYPES.PRIVATE)
+def test_add_items_to_unpublished_list_REFRESH_remove_same_item_from_the_list(list_type, count_items_to_add):
+    unpublished_list = test_add_items_to_unpublished_list_from_claim_preview(list_type, count_items_to_add) # Returns list it added the item to
+    unpublished_list = get_unpublished_list_from_stored_preferences_by_id(unpublished_list['id'], list_type)
     refresh_page_and_wait_prefrence_get()
     print('Testing removing item from private list from claim preview')
 
@@ -439,15 +445,15 @@ def test_add_item_to_private_list_REFRESH_remove_same_item_from_private_list():
         click_3_dot_menu_in_claim_preview_tile(claim_preview_tile)
         click_add_to_list_in_3_dot_menu()
 
-        found_listable_claim_that_is_in_list = is_list_checked(private_list['id'])
+        found_listable_claim_that_is_in_list = is_list_checked(unpublished_list['id'])
         if not found_listable_claim_that_is_in_list:
             click_close_button()
             tiles_tried += 1
 
     short_claim_name = get_short_claim_name_from_claim_preview_tile(claim_preview_tile)
-    click_checkbox_in_save_to_popup(private_list['id'])
+    click_checkbox_in_save_to_popup(unpublished_list['id'])
 
-    check_item_was_removed_properly_from_unpublished_list(private_list['id'], LIST_TYPES.PRIVATE, text_to_match_list_item=short_claim_name)
+    check_item_was_removed_properly_from_unpublished_list(unpublished_list['id'], list_type, text_to_match_list_item=short_claim_name)
 
 def click_lists_in_side_bar():
     lists_btn = driver.find_element(By.CSS_SELECTOR, '[href="/$/playlists"]')
@@ -620,15 +626,6 @@ def test_add_item_to_public_list_from_claim_preview():
 
     check_item_was_added_properly()
 
-def test_add_item_to_edited_list_from_claim_preview():
-    refresh_page_and_wait_prefrence_get()
-    print('Testing adding item to edited list from claim preview')
-    edited_list = get_random_list_from_latest_stored_preferences(LIST_TYPES.EDITED)
-    claim_preview_tile = open_save_to_list_popup_from_listable_claim_preview_tile_that_is_not_in_the_list_and_return_claim_preview_tile(edited_list['id'])
-    short_claim_name = get_short_claim_name_from_claim_preview_tile(claim_preview_tile)
-    click_checkbox_in_save_to_popup(edited_list['id'])
-    check_item_was_added_properly_to_unpublished_list(edited_list, LIST_TYPES.EDITED, short_claim_name)
-
 def is_unpublished_list_empty(list_id, list_type):
     unpublished_list = get_unpublished_list_from_stored_preferences_by_id(list_id, list_type, -1)
     return len(unpublished_list['items']) == 0
@@ -657,11 +654,12 @@ def main():
     reject_cookies()
     log_in() # Also creates first preference state
    # test_create_new_list_from_claim_preview() # Adds the claim to list by default
-   # test_add_item_to_private_list_from_claim_preview()
-   # test_add_item_to_private_list_REFRESH_remove_same_item_from_private_list()
+   # test_add_items_to_unpublished_list_from_claim_preview(LIST_TYPES.PRIVATE, 5)
+   # test_add_items_to_unpublished_list_from_claim_preview(LIST_TYPES.EDITED, 3)
+    test_add_items_to_unpublished_list_REFRESH_remove_same_item_from_the_list(LIST_TYPES.PRIVATE, 2)
+    test_add_items_to_unpublished_list_REFRESH_remove_same_item_from_the_list(LIST_TYPES.EDITED, 1)
    # test_add_item_to_public_list_from_claim_preview()
 
-   # test_add_item_to_edited_list_from_claim_preview()
    # test_remove_all_items_from_unpublished_list_using_file_page(LIST_TYPES.PRIVATE, min_items=1, max_items=5)
    # test_remove_all_items_from_unpublished_list_using_file_page(LIST_TYPES.EDITED, min_items=1, max_items=5)
 
