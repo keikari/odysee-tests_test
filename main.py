@@ -465,7 +465,7 @@ def get_collection_list_response_body_by_navigating_to_list_and_refresh_page():
 
 
 def get_some_item_from_list(my_list):
-    return my_list[random.randint(0, len(my_list) - 1)]
+    return my_list[random.randrange(0, len(my_list))]
 
 
 def has_edits(public_list):
@@ -832,11 +832,65 @@ def test_remove_item_from_public_list_using_file_page():
             print_json(diff)
             raise e
 
+    refresh_page_and_wait_prefrence_get()
+    print('Testing removing item from public list')
     public_list = get_random_public_list_from_latest_collection_list()
     do_search_for_text(public_list['permanent_url'])
     click_add_to_list_in_file_page()
     click_checkbox_in_save_to_popup(public_list['claim_id'])
     check_item_was_removed_properly_from_public_list(public_list['claim_id'], public_list['permanent_url'])
+
+
+def click_clear_updates_button():
+    clear_updates_btn = driver.find_element(By.CSS_SELECTOR, '[aria-label="Delete all edits from this published playlist"]')
+    click_once_clickable(clear_updates_btn)
+
+    ok_btn = driver.find_element(By.CSS_SELECTOR, 'button[aria-label="OK"]')
+    click_item_and_wait_preference_set(ok_btn)
+
+
+def check_list_edits_cleared_properly(list_id):
+    try:
+        old_preferences = preferences[-2]
+        new_preferences = preferences[-1]
+
+        # Create what expected new state should look like from old state
+        expected_preferences = old_preferences
+        del expected_preferences['result']['shared']['value']['editedCollections'][list_id]
+        expected_preferences['result']['shared']['value']['updatedCollections'][list_id]['id'] = list_id
+
+        # Place holder value for updatedAt
+        expected_preferences['result']['shared']['value']['updatedCollections'][list_id]['updatedAt'] = 0
+
+        diff = list(Diff(expected_preferences, new_preferences))
+
+        # Check that only updatedAt differs
+        assert len(diff) == 1
+        assert diff[0][0] == 'change'
+        assert diff[0][1] == f'result.shared.value.updatedCollections.{list_id}.updatedAt'
+        assert is_unix_time_now(diff[0][2][1])
+
+        print('SUCCESS: Edits cleared successfully')
+    except Exception as e:
+        print_json(diff)
+        raise e
+
+
+def test_clear_edits_from_list():
+    print('Testing clearing edits from edited list')
+    list_type = LIST_TYPES.EDITED
+    edited_list = get_random_list_from_latest_stored_preferences(list_type)
+    click_lists_in_side_bar()
+    search_text_in_lists_page(edited_list['title'])
+    click_list_in_lists_page(edited_list['id'])
+    click_edit_on_list_page()
+    click_clear_updates_button()
+
+    check_list_edits_cleared_properly(edited_list['id'])
+
+
+
+
 
 def main():
     driver.get('https://odysee.com')
@@ -845,13 +899,14 @@ def main():
     reject_cookies()
     log_in() # Also creates first preference state
 
+    test_clear_edits_from_list()
 
     # PRIVATE LIST
     #test_create_new_list_from_claim_preview() # Adds the claim to list by default
     #test_unpublished_list_details_edit(LIST_TYPES.PRIVATE)
     #test_add_items_to_unpublished_list_from_claim_preview(LIST_TYPES.PRIVATE, 5)
     #test_add_items_to_unpublished_list_REFRESH_remove_one_item_from_the_list__from_claim_preview(LIST_TYPES.PRIVATE, 2)
-    test_remove_all_items_from_unpublished_list_using_file_page(LIST_TYPES.PRIVATE, min_items=1, max_items=5)
+    #test_remove_all_items_from_unpublished_list_using_file_page(LIST_TYPES.PRIVATE, min_items=1, max_items=5)
     #test_remove_all_items_from_unpublished_list_using_edit(LIST_TYPES.PRIVATE, min_items=1, max_items=10)
 
     # EDITED LIST
