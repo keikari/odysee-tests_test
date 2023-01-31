@@ -33,6 +33,7 @@ class LIST_DELETE_LOCATIONS(Enum):
 class LIST_TYPES(Enum):
     EDITED = 1
     PRIVATE = 2
+    BUILTIN = 3
 
 def json_print(js):
     print(json.dumps(js, indent=2))
@@ -42,7 +43,7 @@ def click_once_clickable(btn):
         WebDriverWait(driver, 5).until(
             EC.element_to_be_clickable(btn)
         ).click()
-    except (ElementClickInterceptedException, ElementNotInteractableException, TimeoutException):
+    except (ElementClickInterceptedException, ElementNotInteractableException):
         driver.execute_script('arguments[0].click();', btn)
 
 
@@ -133,8 +134,7 @@ def get_claim_preview_tiles():
 
 def click_3_dot_menu_in_claim_preview_tile(tile):
     menu_btn = tile.find_element(By.CSS_SELECTOR, '.claim__menu-button')
-    action.move_to_element(tile)
-    action.perform()
+    action.move_to_element(tile).perform()
     click_once_clickable(menu_btn)
 
 def click_add_to_list_in_3_dot_menu():
@@ -272,11 +272,7 @@ def get_random_list_from_latest_stored_preferences(list_type, min_items=0, max_i
     return lists[key]
 
 def get_unpublished_list_from_stored_preferences_by_id(list_id, list_type, preference_index=-1):
-    if list_type == LIST_TYPES.PRIVATE:
-        type_key = 'unpublishedCollections'
-    elif list_type == LIST_TYPES.EDITED:
-        type_key = 'editedCollections'
-
+    type_key = get_key_for_list_type(list_type)
     unpublished_list = preferences[preference_index]['result']['shared']['value'][type_key][list_id]
     return unpublished_list
 
@@ -325,10 +321,8 @@ def check_item_was_added_properly_to_unpublished_list(unpublished_list, list_typ
 
 def test_add_items_to_unpublished_list_from_claim_preview(list_type, count_items_to_add):
     refresh_page_and_wait_prefrence_get()
-    if list_type == LIST_TYPES.PRIVATE:
-        print(f"Testing adding {count_items_to_add} item(s) to private list from claim preview")
-    if list_type == LIST_TYPES.EDITED:
-        print(f"Testing adding {count_items_to_add} item(s) to edited list from claim preview")
+    technical_list_type = get_key_for_list_type(list_type)
+    print(f"Testing adding {count_items_to_add} item(s) to {technical_list_type} from claim preview")
 
     unpublished_list = get_random_list_from_latest_stored_preferences(list_type)
     for i in range(0, count_items_to_add):
@@ -374,6 +368,8 @@ def get_key_for_list_type(list_type):
         key = 'editedCollections'
     elif list_type == LIST_TYPES.PRIVATE:
         key = 'unpublishedCollections'
+    elif list_type == LIST_TYPES.BUILTIN:
+        key = 'builtinCollections'
 
     return key
 
@@ -418,7 +414,8 @@ def test_add_items_to_unpublished_list_REFRESH_remove_one_item_from_the_list__fr
     unpublished_list = test_add_items_to_unpublished_list_from_claim_preview(list_type, count_items_to_add) # Returns list it added the item to
     unpublished_list = get_unpublished_list_from_stored_preferences_by_id(unpublished_list['id'], list_type)
     refresh_page_and_wait_prefrence_get()
-    print('Testing removing item from private list from claim preview')
+    technical_list_type = get_key_for_list_type(list_type)
+    print(f"Testing removing item from {technical_list_type} from claim preview")
 
     # Find claim tile that's in the list already
     found_listable_claim_that_is_in_list = False
@@ -506,8 +503,8 @@ def search_text_in_lists_page(text):
     search_input.send_keys(text)
 
 def click_list_in_lists_page(list_id):
-    list_url = '/$/playlist/%s' % list_id
-    list_link = driver.find_element(By.CSS_SELECTOR, '[href="%s"]' % list_url)
+    list_url = f'/$/playlist/{list_id}'
+    list_link = driver.find_element(By.CSS_SELECTOR, f'[href="{list_url}"]')
     click_once_clickable(list_link)
 
 def navigate_to_list_page(unpublished_list):
@@ -545,11 +542,10 @@ def remove_all_unpublished_list_items_in_arrange_mode(list_id, list_name, list_t
                                                           deleted_from=LIST_DELETE_LOCATIONS.ARRANGE_MODE)
 
 def test_remove_all_items_from_unpublished_list_using_edit(list_type, min_items=0, max_items=99999):
-    if list_type == LIST_TYPES.PRIVATE:
-        print("Testing removing all items from private list using edit")
-    elif list_type == LIST_TYPES.EDITED:
-        print("Testing removing all items from edited list using edit")
     refresh_page_and_wait_prefrence_get()
+    technical_list_type = get_key_for_list_type(list_type)
+    print(f"Testing removing all items from {technical_list_type} using edit")
+
     unpublished_list = get_random_list_from_latest_stored_preferences(list_type, min_items, max_items)
     navigate_to_list_page(unpublished_list)
     click_arrange_mode_in_list_page()
@@ -653,10 +649,8 @@ def is_unpublished_list_empty(list_id, list_type):
 
 def test_remove_all_items_from_unpublished_list_using_file_page(list_type, min_items=0, max_items=99999):
     refresh_page_and_wait_prefrence_get()
-    if list_type == LIST_TYPES.PRIVATE:
-        print("Testing removing all items from private list using file page")
-    elif list_type == LIST_TYPES.EDITED:
-        print("Testing removing all items from edited list using file page")
+    technical_list_type = get_key_for_list_type(list_type)
+    print(f"Testing removing all items from {technical_list_type} from claim preview")
 
     unpublished_list = get_random_list_from_latest_stored_preferences(list_type, min_items, max_items)
     for lbry_url in unpublished_list['items']:
@@ -756,12 +750,10 @@ def check_unpublished_list_edits_got_applied_properly(list_id, list_type, new_de
         raise e
 
 def test_unpublished_list_details_edit(list_type):
-    if list_type == LIST_TYPES.PRIVATE:
-        print("Testing editing private list details")
-    elif list_type == LIST_TYPES.EDITED:
-        print("Testing editing edited list details")
-
     refresh_page_and_wait_prefrence_get()
+    technical_list_type = get_key_for_list_type(list_type)
+    print(f"Testing editing {technical_list_type} details")
+
     click_lists_in_side_bar()
     unpublished_list = get_random_list_from_latest_stored_preferences(list_type)
     search_text_in_lists_page(unpublished_list['name'])
@@ -983,7 +975,6 @@ def check_private_list_was_deleted_properly(list_id):
         json_print(diff)
         raise e
 
-
 def test_delete_private_list():
     list_type = LIST_TYPES.PRIVATE
     refresh_page_and_wait_prefrence_get()
@@ -996,7 +987,6 @@ def test_delete_private_list():
     click_delete_btn()
     check_private_list_was_deleted_properly(private_list['id'])
 
-
 def main():
     driver.get(website_url)
     driver.implicitly_wait(10)
@@ -1005,16 +995,16 @@ def main():
     log_in() # Also creates first preference state
 
 
-   # PRIVATE LIST
+   ## PRIVATE LIST
    # test_create_new_list_from_claim_preview() # Adds the claim to list by default
    # test_unpublished_list_details_edit(LIST_TYPES.PRIVATE)
    # test_add_items_to_unpublished_list_from_claim_preview(LIST_TYPES.PRIVATE, 1)
    # test_add_items_to_unpublished_list_REFRESH_remove_one_item_from_the_list__from_claim_preview(LIST_TYPES.PRIVATE, 2)
    # test_remove_all_items_from_unpublished_list_using_file_page(LIST_TYPES.PRIVATE, min_items=1, max_items=5)
    # test_remove_all_items_from_unpublished_list_using_edit(LIST_TYPES.PRIVATE, min_items=1, max_items=10)
-    test_delete_private_list()
+   # test_delete_private_list()
 
-   # PUBLIC LIST
+   ## PUBLIC LIST
    # test_clear_edits_from_list()
    # test_add_item_to_public_list_from_claim_preview()
    # test_clear_edits_from_list()
@@ -1022,13 +1012,19 @@ def main():
    # test_clear_edits_from_list()
    # test_edit_public_list_details()
 
-   # EDITED LIST
+   ## EDITED LIST
    # test_unpublished_list_details_edit(LIST_TYPES.EDITED)
    # test_add_items_to_unpublished_list_from_claim_preview(LIST_TYPES.EDITED, 2)
    # test_add_items_to_unpublished_list_REFRESH_remove_one_item_from_the_list__from_claim_preview(LIST_TYPES.EDITED, 2)
    # test_remove_all_items_from_unpublished_list_using_file_page(LIST_TYPES.EDITED, min_items=1, max_items=5)
    # test_remove_all_items_from_unpublished_list_using_edit(LIST_TYPES.EDITED, min_items=1, max_items=10)
    # test_clear_edits_from_list()
+
+   # BUILTIN LIST
+    test_add_items_to_unpublished_list_from_claim_preview(LIST_TYPES.BUILTIN, 2)
+    test_add_items_to_unpublished_list_REFRESH_remove_one_item_from_the_list__from_claim_preview(LIST_TYPES.BUILTIN, 2)
+    test_remove_all_items_from_unpublished_list_using_file_page(LIST_TYPES.BUILTIN, min_items=1)
+    test_remove_all_items_from_unpublished_list_using_edit(LIST_TYPES.BUILTIN, min_items=1)
 
     input('Press enter to stop(may need to still close window)')
 
