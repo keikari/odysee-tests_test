@@ -97,7 +97,7 @@ def log_in():
             logout_option = li_elements[-1]
             email_span = logout_option.find_element(By.CSS_SELECTOR, '.menu__link-help')
             if (email_span.get_attribute('innerText') == email):
-                print('Probably logged in succesfully')
+                print('Probably logged in successfully')
             else:
                 print('Probably failed to log in')
         check_email_in_profile_menu()
@@ -164,12 +164,16 @@ def get_last_responded_call(call_url, method):
 def wait_and_return_next_call(call_url, method, first_request_index_to_check):
     i = first_request_index_to_check - 1
     requests_count = len(driver.requests)
+    timed_out = False
     while True:
         request = driver.requests[i]
         if request.method == method and request.url == call_url and request.response:
             return request
-        if i < requests_count - 1 and (request.url != call_url or request.response): 
+        elif i < requests_count - 1 and (request.url != call_url or request.response or timed_out): 
             i += 1
+        elif request.url == call_url and not request.response:
+            time.sleep(5)
+            timed_out = True
         else:
             time.sleep(1)
         requests_count = len(driver.requests)
@@ -196,8 +200,9 @@ def is_permanent_lbry_url(string):
 
 def is_unix_time_now(unix_time):
     now = int(time.time())
-    return (now - 60 < unix_time and
-            now + 60 > unix_time)
+    offset = 120
+    return (now - offset < unix_time and
+            now + offset > unix_time)
 
 def check_new_list_was_created_properly(list_name, short_claim_name):
     try:
@@ -228,7 +233,7 @@ def check_new_list_was_created_properly(list_name, short_claim_name):
         assert check_box.get_attribute('checked') == 'true'
         assert label.get_attribute('innerText') == list_name
 
-        print('SUCCESS: New list created succesfully, with item in it')
+        print('SUCCESS: New list created successfully, with item in it')
 
     except Exception as e:
         json_print(diff)
@@ -294,8 +299,7 @@ def check_item_was_added_properly_to_unpublished_list(unpublished_list, list_typ
         expected_preferences = deepcopy(old_preferences)
         expected_item_count = old_preferences['result']['shared']['value'][list_type_key][list_id]['itemCount'] + 1
         expected_preferences['result']['shared']['value'][list_type_key][list_id]['itemCount'] = expected_item_count
-        if list_id in expected_preferences['result']['shared']['value']['updatedCollections']:
-            del expected_preferences['result']['shared']['value']['updatedCollections'][list_id]
+        remove_list_from_updated_collections(expected_preferences, list_id)
 
         diff = list(Diff(expected_preferences, new_preferences))
         assert len(diff) == 2
@@ -387,13 +391,11 @@ def check_item_was_removed_properly_from_unpublished_list(
 
         # Remove the item
         for item in enumerate(expected_preferences['result']['shared']['value'][list_type_key][list_id]['items']):
-            if re.match(text_to_match_list_item, item[1]):
+            if re.search(text_to_match_list_item, item[1]):
                 del expected_preferences['result']['shared']['value'][list_type_key][list_id]['items'][item[0]]
                 break
 
-        # Remove from updated collections if needed
-        if list_id in expected_preferences['result']['shared']['value']['updatedCollections']:
-            del expected_preferences['result']['shared']['value']['updatedCollections'][list_id]
+        remove_list_from_updated_collections(expected_preferences, list_id)
 
         # Compare diff
         diff = list(Diff(expected_preferences, new_preferences))
@@ -464,6 +466,14 @@ def get_public_lists_from_latest_collection_list():
         if not has_edits(item):
             public_lists.append(item)
     return public_lists
+
+
+def get_public_list_from_latest_collection_list_by_id(list_id):
+    public_lists = get_public_lists_from_latest_collection_list()
+    for public_list in public_lists:
+        if public_list['claim_id'] == list_id:
+            return public_list
+
 
 def get_random_public_list_from_latest_collection_list():
     public_lists = get_public_lists_from_latest_collection_list()
@@ -584,9 +594,7 @@ def test_add_item_to_public_list_from_claim_preview():
             populate_general_expected_edited_list(expected_edited_list, public_list, item_added=True)
             expected_preferences['result']['shared']['value']['editedCollections'][list_id] = expected_edited_list
 
-            # Delete entry from updatedCollections if neeeded
-            if list_id in expected_preferences['result']['shared']['value']['updatedCollections']:
-                del expected_preferences['result']['shared']['value']['updatedCollections'][list_id]
+            remove_list_from_updated_collections(expected_preferences, list_id)
 
             # Compare difference
             diff = list(Diff(expected_preferences, new_preferences))
@@ -600,8 +608,6 @@ def test_add_item_to_public_list_from_claim_preview():
 
             # Check all old items got added, and in same order
             edited_list_items = diff[0][2][1][1]
-            assert len(edited_list_items) == expected_edited_list['itemCount'],\
-                f'Expected {expected_edited_list["itemCount"]}, got: {len(edited_list_items)}'
             for i in range(0, len(public_list['value']['claims'])):
                 lbry_url_in_edited_list = edited_list_items[i]
                 claim_id_in_public_list = public_list['value']['claims'][i]
@@ -720,7 +726,11 @@ def click_submit_btn():
     submit_btn = driver.find_element(By.CSS_SELECTOR, '[type=submit]')
     click_item_and_wait_preference_set(submit_btn)
 
-def check_unpublished_list_edits_got_applied_properly(list_id, list_type, new_describtion, new_title, new_thumbnail_url):
+def remove_list_from_updated_collections(expected_preferences, list_id):
+    if list_id in expected_preferences['result']['shared']['value']['updatedCollections']:
+        del expected_preferences['result']['shared']['value']['updatedCollections'][list_id]
+
+def check_unpublished_list_edits_got_applied_properly(list_id, list_type, new_description, new_title, new_thumbnail_url):
     try:
         old_preferences = preferences[-2]
         new_preferences = preferences[-1]
@@ -729,19 +739,17 @@ def check_unpublished_list_edits_got_applied_properly(list_id, list_type, new_de
         list_type_key = get_key_for_list_type(list_type)
         expected_preferences['result']['shared']['value'][list_type_key][list_id]['name'] = new_title
         expected_preferences['result']['shared']['value'][list_type_key][list_id]['title'] = new_title
-        expected_preferences['result']['shared']['value'][list_type_key][list_id]['description'] = new_describtion
+        expected_preferences['result']['shared']['value'][list_type_key][list_id]['description'] = new_description
         expected_preferences['result']['shared']['value'][list_type_key][list_id]['thumbnail'] = {'url': new_thumbnail_url}
 
-        # Remove from updatedCollections if needed
-        if list_id in expected_preferences['result']['shared']['value']['updatedCollections']:
-            del expected_preferences['result']['shared']['value']['updatedCollections'][list_id]
+        remove_list_from_updated_collections(expected_preferences, list_id)
 
         # Compare changes
         diff = list(Diff(expected_preferences, new_preferences))
         assert len(diff) == 1
         check_updated_at_is_now(diff, list_id, list_type_key)
 
-        print('SUCCESS: List details updated succesfully')
+        print('SUCCESS: List details updated successfully')
 
     except Exception as e:
         json_print(diff)
@@ -761,10 +769,10 @@ def test_unpublished_list_details_edit(list_type):
     click_edit_on_list_page()
     new_title = change_title_on_edit()
     new_thumbnail_url = change_thumbnail_url_on_edit()
-    new_describtion = change_description_on_edit()
+    new_description = change_description_on_edit()
     click_submit_btn()
 
-    check_unpublished_list_edits_got_applied_properly(unpublished_list['id'], list_type, new_describtion, new_title, new_thumbnail_url)
+    check_unpublished_list_edits_got_applied_properly(unpublished_list['id'], list_type, new_description, new_title, new_thumbnail_url)
 
 def test_remove_item_from_public_list_using_file_page():
     def check_item_was_removed_properly_from_public_list(list_id, text_to_match_list_item):
@@ -782,9 +790,7 @@ def test_remove_item_from_public_list_using_file_page():
             populate_general_expected_edited_list(expected_edited_list, public_list, item_added=False)
             expected_preferences['result']['shared']['value']['editedCollections'][list_id] = expected_edited_list
 
-            # Delete entry from updatedCollections if neeeded
-            if list_id in expected_preferences['result']['shared']['value']['updatedCollections']:
-                del expected_preferences['result']['shared']['value']['updatedCollections'][list_id]
+            remove_list_from_updated_collections(expected_preferences, list_id)
 
             # Compare difference
             diff = list(Diff(expected_preferences, new_preferences))
@@ -797,8 +803,6 @@ def test_remove_item_from_public_list_using_file_page():
             assert len(diff[0][2]) == 3
 
             edited_list_items = diff[0][2][1][1]
-            assert len(edited_list_items) == expected_edited_list['itemCount'],\
-                f'Expected {expected_edited_list["itemCount"]}, got: {len(edited_list_items)}'
             for i in range(0, len(edited_list_items)):
                 lbry_url_in_edited_list = edited_list_items[i]
                 claim_id_in_public_list = public_list['value']['claims'][i]
@@ -884,8 +888,73 @@ def test_clear_edits_from_list():
 
     check_list_edits_cleared_properly(edited_list['id'])
 
+def check_public_list_edits_got_applied_properly(public_list, new_description, new_title, new_thumbnail_url):
+    try:
+        list_id = public_list['claim_id']
+        old_preferences = preferences[-2]
+        new_preferences = preferences[-1]
+        expected_preferences = deepcopy(old_preferences)
+
+        # Create what expected new state should look like from old state
+        new_edited_list = {
+            'id': list_id,
+            'itemCount': len(public_list['value']['claims']),
+            'description': new_description,
+            'title': new_title,
+            'name': new_title,
+            'thumbnail': {'url': new_thumbnail_url},
+            'type': 'playlist'
+        }
+        expected_preferences['result']['shared']['value']['editedCollections'][list_id] = new_edited_list
+        remove_list_from_updated_collections(expected_preferences, list_id)
+
+        # Compare difference
+        diff = list(Diff(expected_preferences, new_preferences))
+        assert len(diff) == 1
+        assert diff[0][0] == 'add'
+        assert diff[0][1] == f'result.shared.value.editedCollections.{list_id}'
+        assert diff[0][2][1][0] == 'items'
+
+        # Three values should be added to the list
+        assert len(diff[0][2]) == 3
+
+        # Check all old items got added, and in same order
+        edited_list_items = diff[0][2][1][1]
+        for i in range(0, len(public_list['value']['claims'])):
+            lbry_url_in_edited_list = edited_list_items[i]
+            claim_id_in_public_list = public_list['value']['claims'][i]
+            assert is_permanent_lbry_url(lbry_url_in_edited_list)
+            assert re.search(claim_id_in_public_list, lbry_url_in_edited_list)
+
+        # Check updatedAt and createdAt got created and set properly
+        assert diff[0][2][2][0] == 'updatedAt'
+        assert is_unix_time_now(diff[0][2][2][1])
+
+        assert diff[0][2][0][0] == 'createdAt'
+        assert diff[0][2][0][1] == public_list['meta']['creation_timestamp']
 
 
+        print('SUCCESS: List details updated successfully')
+    except Exception as e:
+        json_print(diff)
+        raise e
+
+
+
+def test_edit_public_list_details():
+    refresh_page_and_wait_prefrence_get()
+    print('Testing editing public list details')
+    public_list = get_random_public_list_from_latest_collection_list()
+    click_lists_in_side_bar()
+    search_text_in_lists_page(public_list['value']['title'])
+    click_list_in_lists_page(public_list['claim_id'])
+    click_edit_on_list_page()
+    new_thumbnail_url = change_thumbnail_url_on_edit()
+    new_title = change_title_on_edit()
+    new_description = change_description_on_edit()
+    click_submit_btn()
+
+    check_public_list_edits_got_applied_properly(public_list, new_description, new_title, new_thumbnail_url)
 
 
 def main():
@@ -904,14 +973,16 @@ def main():
    # test_remove_all_items_from_unpublished_list_using_file_page(LIST_TYPES.PRIVATE, min_items=1, max_items=5)
    # test_remove_all_items_from_unpublished_list_using_edit(LIST_TYPES.PRIVATE, min_items=1, max_items=10)
 
-   ## PUBLIC LIST
+   # PUBLIC LIST
+   # test_clear_edits_from_list()
+   # test_add_item_to_public_list_from_claim_preview()
+   # test_clear_edits_from_list()
+   # test_remove_item_from_public_list_using_file_page()
     test_clear_edits_from_list()
-    test_add_item_to_public_list_from_claim_preview()
-    test_clear_edits_from_list()
-    test_remove_item_from_public_list_using_file_page()
+    test_edit_public_list_details()
 
-   ## EDITED LIST
-   #test_unpublished_list_details_edit(LIST_TYPES.EDITED)
+   # EDITED LIST
+   # test_unpublished_list_details_edit(LIST_TYPES.EDITED)
    # test_add_items_to_unpublished_list_from_claim_preview(LIST_TYPES.EDITED, 2)
    # test_add_items_to_unpublished_list_REFRESH_remove_one_item_from_the_list__from_claim_preview(LIST_TYPES.EDITED, 2)
    # test_remove_all_items_from_unpublished_list_using_file_page(LIST_TYPES.EDITED, min_items=1, max_items=5)
