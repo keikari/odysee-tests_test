@@ -939,8 +939,6 @@ def check_public_list_edits_got_applied_properly(public_list, new_description, n
         json_print(diff)
         raise e
 
-
-
 def test_edit_public_list_details():
     refresh_page_and_wait_prefrence_get()
     print('Testing editing public list details')
@@ -955,6 +953,48 @@ def test_edit_public_list_details():
     click_submit_btn()
 
     check_public_list_edits_got_applied_properly(public_list, new_description, new_title, new_thumbnail_url)
+
+def click_element_by_selector(selector, wait_preference_set=False):
+    btn = driver.find_element(By.CSS_SELECTOR, selector)
+    if wait_preference_set:
+        click_item_and_wait_preference_set(btn)
+    else:
+        click_once_clickable(btn)
+
+def click_delete_playlist_btn():
+    click_element_by_selector('[aria-label="Delete Playlist"]')
+
+def click_delete_btn():
+    click_element_by_selector('[aria-label="Delete"]', wait_preference_set=True)
+
+def check_private_list_was_deleted_properly(list_id):
+    try:
+        old_preferences = preferences[-2]
+        new_preferences = preferences[-1]
+        expected_preferences = deepcopy(old_preferences)
+
+        del expected_preferences['result']['shared']['value']['unpublishedCollections'][list_id]
+
+        # Compare difference
+        diff = list(Diff(expected_preferences, new_preferences))
+        assert diff == []
+        print('SUCCESS: Private list deleted successfully')
+    except Exception as e:
+        json_print(diff)
+        raise e
+
+
+def test_delete_private_list():
+    list_type = LIST_TYPES.PRIVATE
+    refresh_page_and_wait_prefrence_get()
+    print('Testing deleting private list')
+    private_list = get_random_list_from_latest_stored_preferences(list_type)
+    click_lists_in_side_bar()
+    search_text_in_lists_page(private_list['name'])
+    click_list_in_lists_page(private_list['id'])
+    click_delete_playlist_btn()
+    click_delete_btn()
+    check_private_list_was_deleted_properly(private_list['id'])
 
 
 def main():
@@ -972,14 +1012,15 @@ def main():
    # test_add_items_to_unpublished_list_REFRESH_remove_one_item_from_the_list__from_claim_preview(LIST_TYPES.PRIVATE, 2)
    # test_remove_all_items_from_unpublished_list_using_file_page(LIST_TYPES.PRIVATE, min_items=1, max_items=5)
    # test_remove_all_items_from_unpublished_list_using_edit(LIST_TYPES.PRIVATE, min_items=1, max_items=10)
+    test_delete_private_list()
 
    # PUBLIC LIST
    # test_clear_edits_from_list()
    # test_add_item_to_public_list_from_claim_preview()
    # test_clear_edits_from_list()
    # test_remove_item_from_public_list_using_file_page()
-    test_clear_edits_from_list()
-    test_edit_public_list_details()
+   # test_clear_edits_from_list()
+   # test_edit_public_list_details()
 
    # EDITED LIST
    # test_unpublished_list_details_edit(LIST_TYPES.EDITED)
