@@ -9,7 +9,7 @@ from seleniumwire import webdriver
 from seleniumwire.utils import decode
 
 from selenium.webdriver.common.by import By
-from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support.ui import WebDriverWait, Select
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.common.keys import Keys
 from selenium.common.exceptions import ElementNotInteractableException, NoSuchElementException, ElementClickInterceptedException, TimeoutException
@@ -43,7 +43,7 @@ def click_once_clickable(btn):
         WebDriverWait(driver, 5).until(
             EC.element_to_be_clickable(btn)
         ).click()
-    except (ElementClickInterceptedException, ElementNotInteractableException):
+    except (ElementClickInterceptedException, ElementNotInteractableException, TimeoutException):
         driver.execute_script('arguments[0].click();', btn)
 
 
@@ -119,7 +119,7 @@ def log_in():
 def claim_preview_tile_has_duration(tile):
     has_duration = False
     driver.implicitly_wait(1)
-    try: 
+    try:
         overlay_icon = tile.find_element(By.CSS_SELECTOR, '.claim-preview__overlay-properties')
         duration_span = overlay_icon.find_element(By.CSS_SELECTOR, 'span')
         has_duration = re.match('([0-9]{2}:){1,}[0-9]{2}', duration_span.get_attribute('innerText'))
@@ -169,7 +169,7 @@ def wait_and_return_next_call(call_url, method, first_request_index_to_check):
         request = driver.requests[i]
         if request.method == method and request.url == call_url and request.response:
             return request
-        elif i < requests_count - 1 and (request.url != call_url or request.response or timed_out): 
+        elif i < requests_count - 1 and (request.url != call_url or request.response or timed_out):
             i += 1
         elif request.url == call_url and not request.response:
             time.sleep(5)
@@ -677,6 +677,19 @@ def change_title_on_edit():
             title_input.send_keys(title)
             return title
 
+def change_name_on_edit():
+    test_names = ["CoolName", "Not-cool-name"]
+    name_input = driver.find_element(By.CSS_SELECTOR, 'input[name="collection_name"]')
+    old_name = name_input.get_attribute('value')
+
+    for name in test_names:
+        if name != old_name:
+            name = name + f'-{random.randint(1, 9999)}' # Randint so all won't be same
+            name_input.send_keys(Keys.CONTROL + 'a')
+            name_input.send_keys(Keys.BACKSPACE)
+            name_input.send_keys(name)
+            return name
+
 def click_enter_a_thumbnail_url():
     try:
         driver.implicitly_wait(1)
@@ -709,6 +722,8 @@ def change_description_on_edit():
 
     for description in test_descriptions:
         if description != old_description:
+            driver.execute_script('arguments[0].scrollIntoView({block: "center"});', description_text_span)
+            time.sleep(1)
             action.move_to_element(description_text_span).click().perform()
             action.key_down(Keys.CONTROL).send_keys('a').perform()
             action.send_keys(Keys.BACKSPACE).perform()
@@ -716,7 +731,16 @@ def change_description_on_edit():
 
             return description
 
-def click_submit_btn():
+def add_tags_on_edit():
+    test_tags = ['tag 1', 'tag 2', 'banananana tag', 'not a tag', 'line---tag']
+    tags_input = driver.find_element(By.CSS_SELECTOR, '[class="tag__input"]')
+
+    for tag in test_tags:
+        tags_input.send_keys(tag + Keys.RETURN)
+
+    return test_tags
+
+def click_submit_btn_and_wait_pref_set():
     submit_btn = driver.find_element(By.CSS_SELECTOR, '[type=submit]')
     click_item_and_wait_preference_set(submit_btn)
 
@@ -762,7 +786,7 @@ def test_unpublished_list_details_edit(list_type):
     new_title = change_title_on_edit()
     new_thumbnail_url = change_thumbnail_url_on_edit()
     new_description = change_description_on_edit()
-    click_submit_btn()
+    click_submit_btn_and_wait_pref_set()
 
     check_unpublished_list_edits_got_applied_properly(unpublished_list['id'], list_type, new_description, new_title, new_thumbnail_url)
 
@@ -942,7 +966,7 @@ def test_edit_public_list_details():
     new_thumbnail_url = change_thumbnail_url_on_edit()
     new_title = change_title_on_edit()
     new_description = change_description_on_edit()
-    click_submit_btn()
+    click_submit_btn_and_wait_pref_set()
 
     check_public_list_edits_got_applied_properly(public_list, new_description, new_title, new_thumbnail_url)
 
@@ -987,6 +1011,156 @@ def test_delete_private_list():
     click_delete_btn()
     check_private_list_was_deleted_properly(private_list['id'])
 
+def click_publish_updates_btn():
+    click_element_by_selector('[aria-label="Publish Updates"]')
+
+def click_publish_btn():
+    click_element_by_selector('[aria-label="Publish"]')
+
+def click_show_btn():
+    click_element_by_selector('[aria-label="Show"]')
+
+def set_language_on_edit():
+    languages = ['fi', 'en']
+    select = Select(driver.find_element(By.CSS_SELECTOR, 'select[id="language_select"]'))
+    selected_lang = select.first_selected_option.get_attribute('value')
+
+    for lang in languages:
+        if lang != selected_lang:
+            select.select_by_value(lang)
+            return lang
+
+def set_secondary_language_on_edit():
+    languages = ['de', 'se']
+    select = Select(driver.find_element(By.CSS_SELECTOR, 'select[id="language_select2"]'))
+    selected_lang = select.first_selected_option.get_attribute('value')
+
+    for lang in languages:
+        if lang != selected_lang:
+            select.select_by_value(lang)
+            return lang
+
+def set_deposit_amount_on_edit():
+    amounts = ['0.0003', '0.0002']
+    deposit_input = driver.find_element(By.CSS_SELECTOR, 'input.form-field--price-amount')
+    current_amount = deposit_input.get_attribute('value')
+
+    for amount in amounts:
+        if current_amount != amount:
+            deposit_input.send_keys(Keys.CONTROL + 'a')
+            deposit_input.send_keys(Keys.BACKSPACE)
+            deposit_input.send_keys(amount)
+            return amount
+
+def click_submit_btn_and_wait_pref_set_and_return_response_for_call(call_url):
+    current_network_requests_count = len(driver.requests)
+    click_submit_btn_and_wait_pref_set()
+    collection_create_call = wait_and_return_next_call(call_url, 'POST', current_network_requests_count)
+    return decode_response_body(collection_create_call.response)
+
+def check_collection_claim_created_properly(private_list, list_type_key, claim, expected_claim, channel_title):
+    ignore_keys = [
+        "address",
+        "claim_id",
+        "claim_op",
+        "confirmations",
+        "height",
+        "is_channel_signature_valid",
+        "meta",
+        "normalized_name",
+        "nout",
+        "permanent_url",
+        "signing_channel",
+        "timestamp",
+        "txid",
+        "type",
+      ]
+
+    diff = list(Diff(expected_claim, claim, ignore=ignore_keys))
+
+    assert len(diff) == 1
+    assert diff[0][0] == 'add'
+    assert diff[0][1] == 'value'
+
+    # Check all items got added, and in same order
+    public_list_items = diff[0][2][0][1]
+    for i in range(0, len(public_list_items)):
+        lbry_url_in_private_list = private_list['items'][i]
+        claim_id_in_public_list = public_list_items[i]
+        assert is_permanent_lbry_url(lbry_url_in_private_list)
+        assert re.search(claim_id_in_public_list, lbry_url_in_private_list)
+
+    # Check that channel title matches
+    assert claim['signing_channel']['value']['title']
+
+    ## Check unpublished list got removed from wallet
+    new_preferences = preferences[-1]
+    old_preferences = preferences[-2]
+    expected_preferences = deepcopy(old_preferences)
+
+    del expected_preferences['result']['shared']['value'][list_type_key][private_list['id']]
+
+    diff = list(Diff(expected_preferences, new_preferences))
+    assert diff == []
+
+    print('SUCCESS: List published/updated succesfully')
+
+
+
+def get_active_channel_title_on_edit():
+    channel_drop_down_thing = driver.find_element(By.CSS_SELECTOR, 'div.claim-preview__title')
+    channel_title = channel_drop_down_thing.get_attribute('innerText')
+    return channel_title
+
+def test_publish_unpublished_list(list_type):
+    refresh_page_and_wait_prefrence_get()
+    list_type_key = get_key_for_list_type(list_type)
+    print(f'Testing publishing {list_type_key}')
+    private_list = get_random_list_from_latest_stored_preferences(list_type, min_items=1)
+    click_lists_in_side_bar()
+    search_text_in_lists_page(private_list['name'])
+    click_list_in_lists_page(private_list['id'])
+
+    if (list_type == LIST_TYPES.EDITED):
+        click_publish_updates_btn()
+    elif (list_type == LIST_TYPES.PRIVATE):
+        click_publish_btn()
+
+    # Set all fields in publish and create expected_claim
+    expected_claim = {'value':
+                      {'languages': []},
+                      'value_type': 'collection'}
+    expected_claim['value']['title'] = change_title_on_edit()
+
+    if (list_type == LIST_TYPES.PRIVATE):
+        expected_claim['name'] = change_name_on_edit()
+    elif (list_type == LIST_TYPES.EDITED):
+        expected_claim['name'] = private_list['name']
+    expected_claim['value']['thumbnail']= {'url': change_thumbnail_url_on_edit()}
+    expected_claim['value']['description'] = change_description_on_edit()
+
+    # Additional settings
+    click_show_btn()
+    expected_claim['value']['tags'] = add_tags_on_edit()
+    expected_claim['value']['languages'].append(set_language_on_edit())
+    expected_claim['value']['languages'].append(set_secondary_language_on_edit())
+    expected_claim['amount'] = set_deposit_amount_on_edit()
+    channel_title = get_active_channel_title_on_edit()
+
+
+    if (list_type == LIST_TYPES.PRIVATE):
+        publish_url = 'https://api.na-backend.odysee.com/api/v1/proxy?m=collection_create'
+    elif (list_type == LIST_TYPES.EDITED):
+        publish_url = 'https://api.na-backend.odysee.com/api/v1/proxy?m=collection_update'
+    response = click_submit_btn_and_wait_pref_set_and_return_response_for_call(publish_url)
+    claim = response['result']['outputs'][0]
+
+    check_collection_claim_created_properly(private_list, list_type_key, claim, expected_claim, channel_title)
+
+
+
+
+
 def main():
     driver.get(website_url)
     driver.implicitly_wait(10)
@@ -998,11 +1172,11 @@ def main():
    ## PRIVATE LIST
    # test_create_new_list_from_claim_preview() # Adds the claim to list by default
    # test_unpublished_list_details_edit(LIST_TYPES.PRIVATE)
-   # test_add_items_to_unpublished_list_from_claim_preview(LIST_TYPES.PRIVATE, 1)
    # test_add_items_to_unpublished_list_REFRESH_remove_one_item_from_the_list__from_claim_preview(LIST_TYPES.PRIVATE, 2)
    # test_remove_all_items_from_unpublished_list_using_file_page(LIST_TYPES.PRIVATE, min_items=1, max_items=5)
    # test_remove_all_items_from_unpublished_list_using_edit(LIST_TYPES.PRIVATE, min_items=1, max_items=10)
    # test_delete_private_list()
+    test_publish_unpublished_list(LIST_TYPES.PRIVATE)
 
    ## PUBLIC LIST
    # test_clear_edits_from_list()
@@ -1014,17 +1188,16 @@ def main():
 
    ## EDITED LIST
    # test_unpublished_list_details_edit(LIST_TYPES.EDITED)
-   # test_add_items_to_unpublished_list_from_claim_preview(LIST_TYPES.EDITED, 2)
    # test_add_items_to_unpublished_list_REFRESH_remove_one_item_from_the_list__from_claim_preview(LIST_TYPES.EDITED, 2)
    # test_remove_all_items_from_unpublished_list_using_file_page(LIST_TYPES.EDITED, min_items=1, max_items=5)
    # test_remove_all_items_from_unpublished_list_using_edit(LIST_TYPES.EDITED, min_items=1, max_items=10)
    # test_clear_edits_from_list()
 
    # BUILTIN LIST
-    test_add_items_to_unpublished_list_from_claim_preview(LIST_TYPES.BUILTIN, 2)
-    test_add_items_to_unpublished_list_REFRESH_remove_one_item_from_the_list__from_claim_preview(LIST_TYPES.BUILTIN, 2)
-    test_remove_all_items_from_unpublished_list_using_file_page(LIST_TYPES.BUILTIN, min_items=1)
-    test_remove_all_items_from_unpublished_list_using_edit(LIST_TYPES.BUILTIN, min_items=1)
+   # test_add_items_to_unpublished_list_from_claim_preview(LIST_TYPES.BUILTIN, 2)
+   # test_add_items_to_unpublished_list_REFRESH_remove_one_item_from_the_list__from_claim_preview(LIST_TYPES.BUILTIN, 2)
+   # test_remove_all_items_from_unpublished_list_using_file_page(LIST_TYPES.BUILTIN, min_items=1)
+   # test_remove_all_items_from_unpublished_list_using_edit(LIST_TYPES.BUILTIN, min_items=1)
 
     input('Press enter to stop(may need to still close window)')
 
